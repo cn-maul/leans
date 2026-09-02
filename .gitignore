@@ -1,0 +1,20 @@
+# Go
+backend/leans.exe
+backend/leans.exe~
+backend/data/
+backend/static/
+*.db
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# IDE / 工具
+.vscode/
+.idea/
+.zcode/
+
+# 系统/备份
+*.log
+*~
+Thumbs.db
