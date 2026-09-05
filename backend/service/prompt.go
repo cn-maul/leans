@@ -10,9 +10,15 @@ import (
 )
 
 // analysisPrompt 是"正文"模板：只描述结果结构与模块/颜色规则。
-// 讲义正文与题目由 BuildAnalysisPrompt 以检索后的章节注入。
+// 题型清单、讲义正文与题目由 BuildAnalysisPrompt 注入。
 // 模板刻意精简以控制 token 占用；讲义注入量由 lectureBudget 限制。
 const analysisPrompt = `你是公务员考试题目分析专家。根据讲义章节分析题目，只输出 JSON，不要任何多余文字。
+
+## 无视觉约束
+你只能看到题目文本，看不到任何图片、图表、截图、公式或版式。不要假设存在图像内容；若文本包含图片/图表占位符或信息明显缺失，基于可见文字判断，并在 annotation 中如实说明"无法从文本判断"，不要编造。
+
+## 题型清单
+%s
 
 ## 讲义章节（已按相关度挑选）
 %s
@@ -25,28 +31,29 @@ const analysisPrompt = `你是公务员考试题目分析专家。根据讲义�
 
 ## 输出 JSON 结构
 {
-  "category": "题型大类",
-  "sub_category": "具体题型",
+  "type_judgment": {
+    "category": "题型大类（必须从题型清单中选择）",
+    "sub_category": "具体题型（尽量从题型清单中选择）"
+  },
+  "technique_judgment": {
+    "rules": [{"name": "规则名", "section": "讲义章节", "usage": "该技巧在这道题里怎么用：结合题干的具体词句说明套用过程（≤60字）"}]
+  },
   "answer": "答案选项，如 B",
-  "basis": [{"text": "判断题型的词句", "location": "题干或选项A/B/C/D", "explanation": "判断理由（≤15字）"}],
-  "rules": [{"name": "规则名", "section": "讲义章节", "usage": "怎么套用（≤30字）", "example": "示例（≤15字）", "marks": [{"text": "命中词句", "location": "题干或选项A/B/C/D", "explanation": "为何命中（≤15字）"}]}],
-  "annotation": "解题思路（≤150字）：判断题型→套规则→逐项排除→答案依据",
+  "annotation": "解题思路（≤150字）：逐项分析选项对错与答案依据；不要重复 rules.usage 已说明的技巧套用过程",
   "highlights": [{"text": "关键词句", "type": "类型（≤6字）", "module": "category|rule|annotation|error|info", "location": "题干或选项A/B/C/D", "explanation": "为何重要（≤15字）"}]
 }
 
-## module 颜色
-category=蓝(题型依据) rule=绿(规则命中) annotation=紫(答案/主旨) error=红(转折/错误) info=黄(关键信息)
-
 ## 原则
-1. basis 与各 rule.marks 的词句必须同时出现在 highlights 中且 module 对应（左右颜色一致）
+1. 先判断题型，再匹配技巧；highlights 覆盖题型判断、技巧命中、答案主旨、错误/转折、关键信息等词句，module 与含义一一对应
 2. text 必须能在题目原文逐字找到；location 只能是"题干"或"选项A"…"选项D"
-3. rules 从讲义精准匹配并注明章节
-4. 严格控制长度：highlights≤5条、basis≤2条、rules≤2条、每条marks≤2个、annotation≤150字、每个explanation≤15字。宁可精简，不要冗长。`
+3. rules 只能引用"讲义章节"中实际出现的内容并注明章节；rules 的每个对象只允许 name、section、usage 三个字段；usage 必填，必须结合本题题干词句说明技巧怎么用，禁止照抄讲义原文；讲义没有对应技巧时 rules 返回空数组，禁止编造规则
+4. category 必须从题型清单中选择；清单没有明确对应时选择最接近的，并在 highlights 中用 module=category 标注判断词句
+5. 严格控制长度：highlights≤5条、rules≤2条、每个usage≤60字、annotation≤150字、每个explanation≤15字。宁可精简，不要冗长。`
 
 // BuildAnalysisPrompt 用检索到的相关章节构造 system+user 消息。
 // lectureBudget 控制讲义注入的字符上限（token 大头）。
 // 概述章节单独进"整体概述"槽位，避免与讲义正文重复注入。
-func BuildAnalysisPrompt(subName string, hits []subject.Hit, question string, strictJSON bool, lectureBudget int) []model.ChatMessage {
+func BuildAnalysisPrompt(subName string, hits []subject.Hit, typeCatalog []string, question string, strictJSON bool, lectureBudget int) []model.ChatMessage {
 	var lecture strings.Builder
 	budget := lectureBudget
 	if budget <= 0 {
@@ -55,7 +62,7 @@ func BuildAnalysisPrompt(subName string, hits []subject.Hit, question string, st
 
 	var overviewHits []subject.Hit
 	for _, h := range hits {
-		if isOverviewTitle(h.Title) {
+		if subject.IsOverviewTitle(h.Title) {
 			overviewHits = append(overviewHits, h)
 			continue
 		}
@@ -74,7 +81,8 @@ func BuildAnalysisPrompt(subName string, hits []subject.Hit, question string, st
 	}
 
 	overview := buildOverview(overviewHits)
-	body := fmt.Sprintf(analysisPrompt, lecture.String(), overview, question)
+	typeList := formatTypeCatalog(typeCatalog)
+	body := fmt.Sprintf(analysisPrompt, typeList, lecture.String(), overview, question)
 	if strictJSON {
 		body += "\n【重要】只输出 JSON，禁止 markdown 代码块、注释或多余文字。"
 	}
@@ -82,7 +90,7 @@ func BuildAnalysisPrompt(subName string, hits []subject.Hit, question string, st
 	return []model.ChatMessage{
 		{
 			Role:    "system",
-			Content: fmt.Sprintf("你是一个专业的公务员考试分析助手，擅长%s题目。只输出 JSON。", subName),
+			Content: fmt.Sprintf("你是一个专业的公务员考试分析助手，擅长%s题目。只输出 JSON。当前任务只有纯文本，没有图片、图表或公式输入。", subName),
 		},
 		{
 			Role:    "user",
@@ -91,14 +99,12 @@ func BuildAnalysisPrompt(subName string, hits []subject.Hit, question string, st
 	}
 }
 
-// isOverviewTitle 判断章节标题是否属于"总体介绍"性质。
-func isOverviewTitle(title string) bool {
-	for _, kw := range []string{"概述", "总论", "整体", "总体", "大纲", "导言", "引言"} {
-		if strings.Contains(title, kw) {
-			return true
-		}
+// formatTypeCatalog 把题型清单压成一行，控制 prompt 的 token 占用。
+func formatTypeCatalog(items []string) string {
+	if len(items) == 0 {
+		return "（未提供题型清单，请根据讲义章节自行归纳）"
 	}
-	return false
+	return strings.Join(items, "、")
 }
 
 // buildOverview 汇总概述章节文本，作为全局上下文。
@@ -118,35 +124,69 @@ func buildOverview(hits []subject.Hit) string {
 // ParseAnalysisResponse 解析 AI 返回文本为结构化结果，带容错与字段规范化。
 func ParseAnalysisResponse(response string) (*model.AnalyzeResponse, error) {
 	cleaned := extractJSON(response)
+	// 部分模型输出 JSON 时会漏掉键值对之间的逗号，先做无副作用的补全修复。
+	cleaned = repairJSONCommas(cleaned)
 	var result model.AnalyzeResponse
 	if err := json.Unmarshal([]byte(cleaned), &result); err != nil {
 		return nil, fmt.Errorf("parse JSON response: %w", err)
 	}
 
-	result.Category = strings.TrimSpace(result.Category)
-	result.SubCategory = strings.TrimSpace(result.SubCategory)
-	result.Answer = strings.TrimSpace(result.Answer)
-	result.Annotation = strings.TrimSpace(result.Annotation)
+	// 旧版数据兜底：没有新字段时映射旧字段；随后统一同步到固定区块。
+	fallbackLegacy(&result)
+	syncJudgments(&result)
+	return &result, nil
+}
 
-	for i := range result.Highlights {
-		result.Highlights[i].Color = normalizeColor(result.Highlights[i].Color)
-		result.Highlights[i].Module = normalizeModule(result.Highlights[i].Module)
-		result.Highlights[i].Location = normalizeLocation(result.Highlights[i].Location)
-	}
-	for i := range result.Basis {
-		result.Basis[i].Module = normalizeModule(result.Basis[i].Module)
-		result.Basis[i].Location = normalizeLocation(result.Basis[i].Location)
-	}
-	for i := range result.Rules {
-		for j := range result.Rules[i].Marks {
-			result.Rules[i].Marks[j].Module = normalizeModule(result.Rules[i].Marks[j].Module)
-			result.Rules[i].Marks[j].Location = normalizeLocation(result.Rules[i].Marks[j].Location)
+// syncJudgments 让 type_judgment / technique_judgment 与旧版顶层字段保持一致，
+// 并对两边的标注做统一的颜色、模块、位置规范化。
+func syncJudgments(r *model.AnalyzeResponse) {
+	r.Answer = strings.TrimSpace(r.Answer)
+	r.Annotation = strings.TrimSpace(r.Annotation)
+	r.Highlights = normalizeHighlights(r.Highlights)
+
+	if r.TypeJudgment != nil {
+		r.TypeJudgment.Category = strings.TrimSpace(r.TypeJudgment.Category)
+		r.TypeJudgment.SubCategory = strings.TrimSpace(r.TypeJudgment.SubCategory)
+		r.TypeJudgment.Basis = normalizeHighlights(r.TypeJudgment.Basis)
+		r.Category = r.TypeJudgment.Category
+		r.SubCategory = r.TypeJudgment.SubCategory
+		r.Basis = r.TypeJudgment.Basis
+	} else {
+		r.TypeJudgment = &model.TypeJudgment{
+			Category:    strings.TrimSpace(r.Category),
+			SubCategory: strings.TrimSpace(r.SubCategory),
+			Basis:       normalizeHighlights(r.Basis),
 		}
 	}
 
-	// 旧版数据兜底：没有新字段时映射旧字段。
-	fallbackLegacy(&result)
-	return &result, nil
+	if r.TechniqueJudgment != nil {
+		r.TechniqueJudgment.Rules = normalizeRules(r.TechniqueJudgment.Rules)
+		r.Rules = r.TechniqueJudgment.Rules
+	} else {
+		r.TechniqueJudgment = &model.TechniqueJudgment{Rules: normalizeRules(r.Rules)}
+	}
+}
+
+// normalizeHighlights 对一组标注统一做颜色、模块、位置规范化。
+func normalizeHighlights(hs []model.Highlight) []model.Highlight {
+	for i := range hs {
+		hs[i].Color = normalizeColor(hs[i].Color)
+		hs[i].Module = normalizeModule(hs[i].Module)
+		hs[i].Location = normalizeLocation(hs[i].Location)
+	}
+	return hs
+}
+
+// normalizeRules 对每条规则的命中标注做统一规范化。
+func normalizeRules(rs []model.Rule) []model.Rule {
+	for i := range rs {
+		rs[i].Marks = normalizeHighlights(rs[i].Marks)
+		// 统一用法字段：application 为空时回填 usage，前端只读 application。
+		if rs[i].Application == "" {
+			rs[i].Application = rs[i].Usage
+		}
+	}
+	return rs
 }
 
 // fallbackLegacy 将旧版字段（techniques/applicable）映射到新结构，
@@ -288,40 +328,117 @@ func trimJSONLine(line string) string {
 	return line
 }
 
+// repairJSONCommas 在字符串外相邻的 JSON 值之间补上缺失的逗号。
+// 部分模型输出 JSON 时会漏掉 key:value 对之间的逗号。
+// 对合法 JSON 无副作用：合法 JSON 中相邻值之间必然已有逗号，不会触发插入。
+func repairJSONCommas(s string) string {
+	var b strings.Builder
+	b.Grow(len(s) + 16)
+	inString := false
+	escaped := false
+	lastSig := byte(0)   // 字符串外最近的有效字符
+	sawSpace := false    // lastSig 之后是否出现过空白（"1 2" 缺逗号 vs "12" 合法数字）
+	var pendingWS []byte // 暂存的空白，确定是否补逗号后再输出
+
+	needComma := func() bool {
+		switch {
+		case lastSig == '"' || lastSig == '}' || lastSig == ']':
+			return true
+		case lastSig >= '0' && lastSig <= '9':
+			return true
+		case lastSig == 'e' || lastSig == 'l': // true/false/null 的结尾
+			return true
+		}
+		return false
+	}
+
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		if inString {
+			b.WriteByte(ch)
+			switch {
+			case escaped:
+				escaped = false
+			case ch == '\\':
+				escaped = true
+			case ch == '"':
+				inString = false
+				lastSig = '"'
+				sawSpace = false
+			}
+			continue
+		}
+		switch ch {
+		case ' ', '\t', '\r', '\n':
+			if lastSig != 0 {
+				sawSpace = true
+				pendingWS = append(pendingWS, ch)
+			} else {
+				b.WriteByte(ch)
+			}
+		case '"', '{', '[':
+			if needComma() {
+				b.WriteByte(',')
+			}
+			b.Write(pendingWS)
+			pendingWS = pendingWS[:0]
+			b.WriteByte(ch)
+			if ch == '"' {
+				inString = true
+			} else {
+				lastSig = ch
+				sawSpace = false
+			}
+		default:
+			// "1 2" 形式的数字缺逗号（要求之间有空白，避免拆散 "12"）。
+			if sawSpace && lastSig >= '0' && lastSig <= '9' &&
+				(ch == '-' || (ch >= '0' && ch <= '9')) {
+				b.WriteByte(',')
+			}
+			b.Write(pendingWS)
+			pendingWS = pendingWS[:0]
+			b.WriteByte(ch)
+			lastSig = ch
+			sawSpace = false
+		}
+	}
+	b.Write(pendingWS)
+	return b.String()
+}
+
+// colorAliases 把 AI 可能返回的各种颜色表达归一为标准 key。
+var colorAliases = map[string]string{
+	"green": "green", "g": "green", "绿": "green", "绿色": "green",
+	"22c55e": "green", "16a34a": "green",
+	"red": "red", "r": "red", "红": "red", "红色": "red",
+	"ef4444": "red", "dc2626": "red",
+	"blue": "blue", "b": "blue", "蓝": "blue", "蓝色": "blue",
+	"3b82f6": "blue", "2563eb": "blue",
+	"yellow": "yellow", "y": "yellow", "黄": "yellow", "黄色": "yellow",
+	"eab308": "yellow", "ca8a04": "yellow",
+	"purple": "purple", "p": "purple", "紫": "purple", "紫色": "purple",
+	"a855f7": "purple", "9333ea": "purple",
+}
+
 // normalizeColor 把 AI 可能返回的各种颜色表达归一为标准 key。
 func normalizeColor(c string) string {
 	c = strings.ToLower(strings.TrimSpace(c))
-	trimmed := strings.TrimPrefix(c, "#")
-	switch trimmed {
-	case "green", "g", "绿", "绿色", "22c55e", "16a34a":
-		return "green"
-	case "red", "r", "红", "红色", "ef4444", "dc2626":
-		return "red"
-	case "blue", "b", "蓝", "蓝色", "3b82f6", "2563eb":
-		return "blue"
-	case "yellow", "y", "黄", "黄色", "eab308", "ca8a04":
-		return "yellow"
-	case "purple", "p", "紫", "紫色", "a855f7", "9333ea":
-		return "purple"
-	}
-	return ""
+	return colorAliases[strings.TrimPrefix(c, "#")]
+}
+
+// moduleAliases 把 AI 返回的 module 表达归一为标准值。
+var moduleAliases = map[string]string{
+	"category": "category", "题型": "category", "分类": "category", "判断": "category",
+	"rule": "rule", "规则": "rule", "技巧": "rule", "适用": "rule",
+	"annotation": "annotation", "answer": "annotation", "答案": "annotation",
+	"注释": "annotation", "思路": "annotation", "主旨": "annotation",
+	"error": "error", "错误": "error", "转折": "error", "否定": "error",
+	"info": "info", "关键": "info", "信息": "info", "条件": "info",
 }
 
 // normalizeModule 把 AI 返回的 module 表达归一为标准值。
 func normalizeModule(m string) string {
-	switch strings.ToLower(strings.TrimSpace(m)) {
-	case "category", "题型", "分类", "判断":
-		return "category"
-	case "rule", "规则", "技巧", "适用":
-		return "rule"
-	case "annotation", "answer", "答案", "注释", "思路", "主旨":
-		return "annotation"
-	case "error", "错误", "转折", "否定":
-		return "error"
-	case "info", "关键", "信息", "条件":
-		return "info"
-	}
-	return ""
+	return moduleAliases[strings.ToLower(strings.TrimSpace(m))]
 }
 
 // normalizeLocation 把"选项A / 选项 a / A / 题干 / 原文"归一为"题干|选项A|..."。

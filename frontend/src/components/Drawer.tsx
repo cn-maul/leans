@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { X } from 'lucide-react'
 
 interface Props {
   open: boolean
@@ -8,34 +9,38 @@ interface Props {
   footer?: ReactNode
 }
 
-// Drawer 是一个从右侧滑出的抽屉面板，用于承载讲义浏览与历史记录。
 export default function Drawer({ open, title, onClose, children, footer }: Props) {
   return (
     <div
-      className={`fixed inset-0 z-50 transition-opacity ${open ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'}`}
+      className={`fixed inset-0 z-50 transition-opacity duration-200 ${
+        open ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'
+      }`}
       aria-hidden={!open}
     >
-      {/* 遮罩 */}
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      {/* 面板 */}
+      <div className="absolute inset-0 bg-zinc-950/40 backdrop-blur-[2px]" onClick={onClose} />
       <div
-        className={`absolute top-0 right-0 h-full w-full max-w-md bg-white dark:bg-gray-900 shadow-2xl transition-transform duration-300 ${
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className={`absolute top-0 right-0 flex h-full w-full max-w-md flex-col border-l border-zinc-200 bg-white shadow-2xl transition-transform duration-300 dark:border-zinc-800 dark:bg-zinc-900 ${
           open ? 'translate-x-0' : 'translate-x-full'
         }`}
       >
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-gray-800">
-          <h3 className="font-semibold text-gray-800 dark:text-gray-100">{title}</h3>
+        <div className="flex h-14 shrink-0 items-center justify-between border-b border-zinc-100 px-5 dark:border-zinc-800">
+          <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{title}</h3>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 text-xl leading-none transition-colors"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:text-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
             aria-label="关闭"
           >
-            &times;
+            <X className="h-4 w-4" aria-hidden="true" />
           </button>
         </div>
-        <div className="h-[calc(100%-57px)] overflow-y-auto">{children}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
         {footer && (
-          <div className="px-4 py-3 border-t border-gray-100 dark:border-gray-800">{footer}</div>
+          <div className="shrink-0 border-t border-zinc-100 px-5 py-3 dark:border-zinc-800">
+            {footer}
+          </div>
         )}
       </div>
     </div>

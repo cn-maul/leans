@@ -29,10 +29,11 @@ func main() {
 	}
 	defer store.Close()
 
-	absSubjectsDir, _ := filepath.Abs(cfg.Subjects.Dir)
-	subjects, err := subject.NewStore(absSubjectsDir)
+	// NewStore 容忍目录缺失（返回空 store）；仅读取失败时降级为空 store，
+	// 保证应用仍能启动，讲义列表为空。
+	subjects, err := subject.NewStore(cfg.Subjects.Dir)
 	if err != nil {
-		log.Printf("load subjects warning: %v", err)
+		log.Printf("load subjects warning: %v, use empty store", err)
 		subjects, _ = subject.NewStore("")
 	}
 	list := subjects.List()
@@ -71,6 +72,7 @@ func main() {
 
 		analyzeHandler := handler.NewAnalyzeHandler(analyzer)
 		api.POST("/analyze", analyzeHandler.Handle)
+		api.POST("/analyze/stream", analyzeHandler.HandleStream)
 
 		settingsHandler := handler.NewSettingsHandler(store, ai)
 		api.GET("/settings", settingsHandler.Get)
@@ -81,6 +83,9 @@ func main() {
 		api.GET("/history", historyHandler.List)
 		api.GET("/history/:id", historyHandler.Get)
 		api.DELETE("/history", historyHandler.Clear)
+
+		statsHandler := handler.NewStatsHandler(store)
+		api.GET("/stats", statsHandler.Get)
 	}
 
 	staticFS, err := fs.Sub(StaticFS, "static")

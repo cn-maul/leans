@@ -8,9 +8,9 @@ import (
 
 // Retrieval 控制一次检索返回多少、多长的内容。
 type Retrieval struct {
-	MaxSections int   // 最多返回几个相关章节（含概述）
-	MaxChars    int   // 每个章节正文最多保留多少字符
-	OverviewMax int   // 最多注入几个概述章节
+	MaxSections int // 最多返回几个相关章节（含概述）
+	MaxChars    int // 每个章节正文最多保留多少字符
+	OverviewMax int // 最多注入几个概述章节
 }
 
 // Hit 是检索命中的一个章节。Section 指向缓存对象（只读），Content 是
@@ -51,7 +51,7 @@ func (s *Store) Search(id, question string, r Retrieval) []Hit {
 	for _, sec := range sub.sections {
 		score := scoreSection(sec, words)
 		// 概述章节即使基础分 0 也保留（后面有加分），其余需要正分。
-		if score <= 0 && !isOverview(sec.Title) {
+		if score <= 0 && !IsOverviewTitle(sec.Title) {
 			continue
 		}
 		hits = append(hits, Hit{
@@ -62,7 +62,7 @@ func (s *Store) Search(id, question string, r Retrieval) []Hit {
 
 	// 概述章节加分，保证整体介绍一定进入结果。
 	for i := range hits {
-		if isOverview(hits[i].Section.Title) {
+		if IsOverviewTitle(hits[i].Section.Title) {
 			hits[i].Score += 200
 		}
 	}
@@ -74,9 +74,9 @@ func (s *Store) Search(id, question string, r Retrieval) []Hit {
 	// 概述章节只保留前 OverviewMax 个，避免霸屏。
 	var overviews, rest []Hit
 	for _, h := range hits {
-		if isOverview(h.Section.Title) && len(overviews) < r.OverviewMax {
+		if IsOverviewTitle(h.Section.Title) && len(overviews) < r.OverviewMax {
 			overviews = append(overviews, h)
-		} else if !isOverview(h.Section.Title) {
+		} else if !IsOverviewTitle(h.Section.Title) {
 			rest = append(rest, h)
 		}
 	}
@@ -146,16 +146,6 @@ func sectionPath(sub *Subject, target *Section) []string {
 		}
 	}
 	return nil
-}
-
-// isOverview 判断章节标题是否属于"总体介绍"性质。
-func isOverview(title string) bool {
-	for _, kw := range []string{"概述", "总论", "整体", "总体", "大纲", "导言", "引言"} {
-		if strings.Contains(title, kw) {
-			return true
-		}
-	}
-	return false
 }
 
 // tokenize 把中文/英文题目切成检索词：

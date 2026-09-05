@@ -3,6 +3,7 @@ package subject
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -181,6 +182,20 @@ func (s *Subject) Sections() []*Section {
 	return s.sections
 }
 
+// overviewKeywords 是判断"总体介绍"性质章节标题的统一关键词表，
+// 检索与 prompt 构建共用，避免三处定义漂移。
+var overviewKeywords = []string{"概述", "总论", "整体", "总体", "大纲", "导言", "引言"}
+
+// IsOverviewTitle 判断章节标题是否属于"总体介绍"性质。
+func IsOverviewTitle(title string) bool {
+	for _, kw := range overviewKeywords {
+		if strings.Contains(title, kw) {
+			return true
+		}
+	}
+	return false
+}
+
 // Overview returns candidate "overview" sections whose titles mention common
 // overall-introduction keywords, used to always inject a broad context.
 func (s *Subject) Overview() []*Section {
@@ -190,13 +205,53 @@ func (s *Subject) Overview() []*Section {
 		if seen[sec.ID] {
 			continue
 		}
-		t := sec.Title
-		if strings.Contains(t, "概述") || strings.Contains(t, "总论") ||
-			strings.Contains(t, "整体") || strings.Contains(t, "大纲") ||
-			strings.Contains(t, "总体") {
+		if IsOverviewTitle(sec.Title) {
 			out = append(out, sec)
 			seen[sec.ID] = true
 		}
 	}
 	return out
+}
+
+// TypeCatalog 从讲义标题生成紧凑的题型清单，供 prompt 限定 category/sub_category
+// 的取值空间。只保留清洗后的章节标题，按章节树顺序去重，最多返回 limit 个。
+func (s *Store) TypeCatalog(id string, limit int) []string {
+	s.mu.RLock()
+	sub, ok := s.subjects[id]
+	s.mu.RUnlock()
+	if !ok || sub == nil {
+		return nil
+	}
+	if limit <= 0 {
+		limit = 30
+	}
+
+	seen := map[string]bool{}
+	var out []string
+	for _, sec := range sub.sections {
+		title := cleanTypeTitle(sec.Title)
+		if title == "" || IsOverviewTitle(title) || seen[title] {
+			continue
+		}
+		seen[title] = true
+		out = append(out, title)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
+// typeNumberRe 匹配"第一章 / 第一节 / 1.1 / 1、 / 一、"这类序号前缀。
+var typeNumberRe = regexp.MustCompile(`^(?:第[0-9一二三四五六七八九十百]+[章节篇部分]+|(?:\d+\.)*\d+|[一二三四五六七八九十]+)[、.．:：]?\s*`)
+
+// cleanTypeTitle 去掉标题里的章节序号和冗余空白，保留题型名本身。
+func cleanTypeTitle(title string) string {
+	t := strings.TrimSpace(title)
+	t = typeNumberRe.ReplaceAllString(t, "")
+	t = strings.TrimSpace(t)
+	if len([]rune(t)) > 20 {
+		t = string([]rune(t)[:20])
+	}
+	return t
 }

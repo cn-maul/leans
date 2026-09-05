@@ -64,12 +64,57 @@ func initTables(db *sql.DB) error {
 			value TEXT NOT NULL
 		)`,
 		`CREATE TABLE IF NOT EXISTS history (
-			id         INTEGER PRIMARY KEY AUTOINCREMENT,
-			subject    TEXT NOT NULL,
-			question   TEXT NOT NULL,
-			category   TEXT NOT NULL DEFAULT '',
-			result     TEXT NOT NULL DEFAULT '',
-			created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+			id             INTEGER PRIMARY KEY AUTOINCREMENT,
+			subject        TEXT NOT NULL,
+			question       TEXT NOT NULL,
+			category       TEXT NOT NULL DEFAULT '',
+			result         TEXT NOT NULL DEFAULT '',
+			model          TEXT NOT NULL DEFAULT '',
+			tokens         INTEGER NOT NULL DEFAULT 0,
+			elapsed_ms     INTEGER NOT NULL DEFAULT 0,
+			first_token_ms INTEGER NOT NULL DEFAULT 0,
+			created_at     TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+		)`,
+		`CREATE TABLE IF NOT EXISTS questions (
+			id          INTEGER PRIMARY KEY AUTOINCREMENT,
+			subject     TEXT NOT NULL,
+			stem        TEXT NOT NULL,
+			options     TEXT NOT NULL DEFAULT '[]',
+			answer      TEXT NOT NULL DEFAULT '',
+			category    TEXT NOT NULL DEFAULT '',
+			sub_category TEXT NOT NULL DEFAULT '',
+			source      TEXT NOT NULL DEFAULT '',
+			year        TEXT NOT NULL DEFAULT '',
+			difficulty  TEXT NOT NULL DEFAULT '',
+			tags        TEXT NOT NULL DEFAULT '[]',
+			notes       TEXT NOT NULL DEFAULT '',
+			created_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+		)`,
+		`CREATE TABLE IF NOT EXISTS knowledge_units (
+			id             INTEGER PRIMARY KEY AUTOINCREMENT,
+			subject        TEXT NOT NULL,
+			title          TEXT NOT NULL,
+			section        TEXT NOT NULL DEFAULT '',
+			content        TEXT NOT NULL DEFAULT '',
+			kind           TEXT NOT NULL DEFAULT '',
+			keywords       TEXT NOT NULL DEFAULT '[]',
+			rule           TEXT NOT NULL DEFAULT '',
+			example        TEXT NOT NULL DEFAULT '',
+			trap           TEXT NOT NULL DEFAULT '',
+			source_section TEXT NOT NULL DEFAULT '',
+			created_at     TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+		)`,
+		`CREATE TABLE IF NOT EXISTS study_records (
+			id            INTEGER PRIMARY KEY AUTOINCREMENT,
+			subject       TEXT NOT NULL,
+			question_id   INTEGER NOT NULL DEFAULT 0,
+			history_id    INTEGER NOT NULL DEFAULT 0,
+			user_answer   TEXT NOT NULL DEFAULT '',
+			correct       INTEGER NOT NULL DEFAULT 0,
+			difficulty    TEXT NOT NULL DEFAULT '',
+			review_at     TEXT NOT NULL DEFAULT '',
+			skill_change  TEXT NOT NULL DEFAULT '',
+			created_at    TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 		)`,
 	}
 	for _, s := range stmts {
@@ -85,6 +130,18 @@ func initTables(db *sql.DB) error {
 func migrate(db *sql.DB) error {
 	if err := ensureColumn(db, "history", "result", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return fmt.Errorf("migrate history.result: %w", err)
+	}
+	if err := ensureColumn(db, "history", "tokens", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return fmt.Errorf("migrate history.tokens: %w", err)
+	}
+	if err := ensureColumn(db, "history", "elapsed_ms", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return fmt.Errorf("migrate history.elapsed_ms: %w", err)
+	}
+	if err := ensureColumn(db, "history", "model", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("migrate history.model: %w", err)
+	}
+	if err := ensureColumn(db, "history", "first_token_ms", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return fmt.Errorf("migrate history.first_token_ms: %w", err)
 	}
 	return nil
 }

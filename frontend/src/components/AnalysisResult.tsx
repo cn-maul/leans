@@ -1,238 +1,23 @@
-import { useEffect, useState } from 'react'
-import type { AnalysisResult, Highlight, HighlightColor, Rule } from '../types/analysis'
-import { MODULE_COLOR } from '../types/analysis'
+import { useEffect, useRef, useState } from 'react'
+import type { AnalysisResult, PartialAnalysis, Rule } from '../types/analysis'
 
-interface Props {
+interface PanelProps {
   result: AnalysisResult | null
   loading?: boolean
+  // streaming 为 true 时用 partial 渐进渲染。
+  partial?: PartialAnalysis | null
+  firstTokenMS?: number
+  model?: string
 }
 
-// 分析阶段提示文案：真实后端为单次请求，这里用时间推进模拟阶段反馈。
-const STAGES = [
-  '正在检索讲义相关章节…',
-  '正在调用 AI 分析题目…',
-  '正在解析结果与匹配技巧…',
-]
-
-export default function AnalysisResultPanel({ result, loading }: Props) {
-  if (loading) return <AnalysisLoading />
-  if (!result) return <EmptyState />
-  return <ResultView result={result} />
-}
-
-function ResultView({ result }: { result: AnalysisResult }) {
-  const basis = result.basis ?? []
-  const rules = normalizeRules(result)
-  const meta = result.meta
-  const hasMeta = !!meta && (meta.elapsed_ms > 0 || meta.total_tokens > 0)
-
-  return (
-    <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm overflow-hidden">
-      {/* 顶部：分类 + 耗时/token */}
-      <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-800">
-        <div className="flex items-center gap-2 flex-wrap mb-1.5">
-          {result.category && (
-            <span className="px-3 py-1 bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 text-sm font-medium rounded-full">
-              {result.category}
-            </span>
-          )}
-          {result.sub_category && (
-            <span className="px-3 py-1 bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300 text-sm font-medium rounded-full">
-              {result.sub_category}
-            </span>
-          )}
-          {result.answer && (
-            <span className="px-3 py-1 bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 text-sm font-semibold rounded-full">
-              答案 {result.answer}
-            </span>
-          )}
-        </div>
-        {hasMeta && (
-          <div className="text-[11px] text-gray-400 dark:text-gray-500 flex items-center gap-3">
-            <span title="处理耗时">⏱ {(meta.elapsed_ms / 1000).toFixed(1)}s</span>
-            {meta.total_tokens > 0 && (
-              <span title="token 用量">🔤 {meta.total_tokens} tokens</span>
-            )}
-          </div>
-        )}
-      </div>
-
-      <div className="p-4 space-y-4">
-        {/* 模块一：题目匹配（蓝） */}
-        <SectionCard title="题目匹配" desc="根据哪些词句判断题型" accent="blue">
-          {basis.length === 0 ? (
-            <p className="text-sm text-gray-400 dark:text-gray-500">
-              判断依据缺失（旧版数据）
-            </p>
-          ) : (
-            <ul className="space-y-2">
-              {basis.map((h, i) => (
-                <BasisItem key={i} h={h} />
-              ))}
-            </ul>
-          )}
-        </SectionCard>
-
-        {/* 模块二：适用规则（绿） */}
-        <SectionCard
-          title="适用规则"
-          desc="文段与选项中命中的技巧"
-          accent="green"
-        >
-          {rules.length === 0 ? (
-            <p className="text-sm text-gray-400 dark:text-gray-500">
-              未匹配到适用规则
-            </p>
-          ) : (
-            <div className="space-y-3">
-              {rules.map((r, i) => (
-                <RuleCard key={i} rule={r} />
-              ))}
-            </div>
-          )}
-        </SectionCard>
-
-        {/* 模块三：注释和思路（紫） */}
-        <SectionCard title="注释和思路" desc="答案解析与解题思路" accent="purple">
-          {result.annotation ? (
-            <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap">
-              {result.annotation}
-            </p>
-          ) : (
-            <p className="text-sm text-gray-400 dark:text-gray-500">暂无注释</p>
-          )}
-        </SectionCard>
-      </div>
-    </div>
-  )
-}
-
-// ---- 子模块 ----
-
-function SectionCard({
-  title,
-  desc,
-  accent,
-  children,
-}: {
-  title: string
-  desc: string
-  accent: HighlightColor
-  children: React.ReactNode
-}) {
-  const border = {
-    blue: 'border-blue-200 dark:border-blue-800',
-    green: 'border-green-200 dark:border-green-800',
-    purple: 'border-purple-200 dark:border-purple-800',
-    red: 'border-red-200 dark:border-red-800',
-    yellow: 'border-yellow-200 dark:border-yellow-800',
-  }[accent]
-  const titleCls = {
-    blue: 'text-blue-700 dark:text-blue-300',
-    green: 'text-green-700 dark:text-green-300',
-    purple: 'text-purple-700 dark:text-purple-300',
-    red: 'text-red-700 dark:text-red-300',
-    yellow: 'text-yellow-700 dark:text-yellow-300',
-  }[accent]
-
-  return (
-    <div className={`rounded-xl border ${border} overflow-hidden`}>
-      <div className={`px-3 py-2 flex items-center gap-2 bg-opacity-40 ${BG_SOFT[accent]}`}>
-        <span className={`w-2.5 h-2.5 rounded-full ${DOT_CLASS[accent]}`} />
-        <div>
-          <div className={`text-sm font-semibold ${titleCls}`}>{title}</div>
-          <div className="text-[11px] text-gray-400 dark:text-gray-500">{desc}</div>
-        </div>
-      </div>
-      <div className="p-3">{children}</div>
-    </div>
-  )
-}
-
-const BG_SOFT: Record<string, string> = {
-  blue: 'bg-blue-50 dark:bg-blue-900/20',
-  green: 'bg-green-50 dark:bg-green-900/20',
-  purple: 'bg-purple-50 dark:bg-purple-900/20',
-  red: 'bg-red-50 dark:bg-red-900/20',
-  yellow: 'bg-yellow-50 dark:bg-yellow-900/20',
-}
-
-const DOT_CLASS: Record<string, string> = {
-  blue: 'bg-blue-500',
-  green: 'bg-green-500',
-  purple: 'bg-purple-500',
-  red: 'bg-red-500',
-  yellow: 'bg-yellow-500',
-}
-
-function BasisItem({ h }: { h: Highlight }) {
-  const color = MODULE_COLOR[h.module || ''] || h.color || 'blue'
-  return (
-    <li className="flex items-start gap-2 text-sm">
-      <span className={`inline-block mt-1 w-2 h-2 rounded-full shrink-0 ${DOT_CLASS[color]}`} />
-      <div>
-        <span className="text-gray-800 dark:text-gray-100 font-medium">{h.text}</span>
-        {h.location && (
-          <span className="ml-1.5 text-[11px] text-gray-400 dark:text-gray-500">{h.location}</span>
-        )}
-        {h.explanation && (
-          <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{h.explanation}</div>
-        )}
-      </div>
-    </li>
-  )
-}
-
-function RuleCard({ rule }: { rule: Rule }) {
-  const marks = rule.marks ?? []
-  return (
-    <div className="border border-green-200 dark:border-green-800 rounded-lg p-3 bg-green-50/40 dark:bg-green-900/10">
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="font-medium text-green-800 dark:text-green-300 text-sm">{rule.name}</span>
-        {rule.section && (
-          <span className="text-xs text-green-600 dark:text-green-400">{rule.section}</span>
-        )}
-      </div>
-      {rule.usage && (
-        <div className="text-sm text-gray-700 dark:text-gray-300 mt-1.5 leading-relaxed">
-          {rule.usage}
-        </div>
-      )}
-      {rule.example && (
-        <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 italic">{rule.example}</div>
-      )}
-      {marks.length > 0 && (
-        <div className="mt-2 pt-2 border-t border-green-100 dark:border-green-900">
-          <div className="text-[11px] text-green-600 dark:text-green-400 mb-1">命中的词句</div>
-          <ul className="space-y-1">
-            {marks.map((m, j) => (
-              <li key={j} className="flex items-start gap-1.5 text-xs">
-                <span className="inline-block mt-1 w-2 h-2 rounded-full bg-green-500 shrink-0" />
-                <div>
-                  <span className="text-gray-700 dark:text-gray-200 font-medium">{m.text}</span>
-                  {m.location && (
-                    <span className="ml-1 text-gray-400 dark:text-gray-500">{m.location}</span>
-                  )}
-                  {m.explanation && (
-                    <div className="text-gray-500 dark:text-gray-400">{m.explanation}</div>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// 兼容旧数据：把 applicable 映射为 rules。
 function normalizeRules(result: AnalysisResult): Rule[] {
+  if (result.technique_judgment?.rules?.length) return result.technique_judgment.rules
   if (result.rules && result.rules.length > 0) return result.rules
   if (result.applicable && result.applicable.length > 0) {
     return result.applicable.map((a) => ({
       name: a.rule_name,
       section: a.section,
+      application: a.usage,
       usage: a.usage,
       example: a.example,
     }))
@@ -240,43 +25,395 @@ function normalizeRules(result: AnalysisResult): Rule[] {
   return []
 }
 
-function EmptyState() {
-  return (
-    <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm p-8 flex flex-col items-center justify-center text-center">
-      <div className="text-4xl mb-3">📋</div>
-      <div className="text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">
-        分析结果将显示在这里
+// 实时用时计时器（running 期间每 100ms 刷新）。
+function useElapsed(running: boolean): string {
+  const [startedAt] = useState(() => Date.now())
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!running) return
+    const t = setInterval(() => setNow(Date.now()), 100)
+    return () => clearInterval(t)
+  }, [running])
+  return ((now - startedAt) / 1000).toFixed(1)
+}
+
+// ---- 顶部三胶囊：题型 / 技巧名称 / 答案 ----
+
+export function ResultPills({ result, loading, partial }: PanelProps) {
+  if (loading && !partial) {
+    return (
+      <div className="flex shrink-0 items-center gap-2" aria-hidden="true">
+        <PillSkeleton className="w-36" />
+        <PillSkeleton className="w-44" />
+        <PillSkeleton className="w-24" />
       </div>
-      <p className="text-xs text-gray-400 dark:text-gray-500 max-w-[240px] leading-relaxed">
-        选择科目并粘贴题目，点击「开始分析」，这里会展示题目匹配、适用规则与注释思路
-      </p>
+    )
+  }
+
+  if (loading && partial) {
+    // 流式中：胶囊随 AI 输出逐步填充。
+    const typeText = [partial.category, partial.subCategory].filter(Boolean).join(' · ')
+    const techniqueText = partial.rules.map((r) => r.name).join('、')
+    return (
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <Pill label="题型" value={typeText || '…'} delay={0} live />
+        <Pill label="技巧" value={techniqueText || '…'} delay={60} live />
+        <Pill label="答案" value={partial.answer || '…'} solid delay={120} live />
+      </div>
+    )
+  }
+
+  const tj = result?.type_judgment
+  const category = tj?.category || result?.category || ''
+  const subCategory = tj?.sub_category || result?.sub_category || ''
+  const typeText = [category, subCategory].filter(Boolean).join(' · ')
+
+  const rules = result ? normalizeRules(result) : []
+  const techniqueText = rules.map((r) => r.name).join('、')
+  // 未分析时显示占位符，而不是"未匹配技巧"。
+  const techniqueValue = result ? techniqueText || '未匹配技巧' : '—'
+
+  const answer = result?.answer || ''
+
+  return (
+    <div className="flex shrink-0 flex-wrap items-center gap-2">
+      <Pill label="题型" value={typeText || '—'} title={typeText} delay={0} />
+      <Pill
+        label="技巧"
+        value={techniqueValue}
+        title={rules.map((r) => `${r.name}（${r.section}）`).join('、')}
+        delay={60}
+      />
+      <Pill label="答案" value={answer || '—'} solid delay={120} />
     </div>
   )
 }
 
-function AnalysisLoading() {
+function PillSkeleton({ className = '' }: { className?: string }) {
+  return (
+    <div className={`h-9 animate-pulse rounded-full bg-zinc-100 dark:bg-zinc-800 ${className}`} />
+  )
+}
+
+function Pill({
+  label,
+  value,
+  title,
+  solid,
+  delay,
+  live,
+}: {
+  label: string
+  value: string
+  title?: string
+  solid?: boolean
+  delay: number
+  live?: boolean
+}) {
+  const isAnswer = label === '答案'
+  return (
+    <div
+      className={`inline-flex h-9 min-w-0 max-w-full animate-fade-up items-center gap-2 rounded-full border pl-3.5 pr-4 transition-colors ${
+        solid
+          ? 'border-zinc-900 bg-zinc-900 text-white dark:border-zinc-100 dark:bg-zinc-100 dark:text-zinc-900'
+          : 'border-zinc-200 bg-white text-zinc-900 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100'
+      }`}
+      style={{ animationDelay: `${delay}ms` }}
+      title={title || value}
+    >
+      <span
+        className={`shrink-0 text-[11px] tracking-wide ${
+          solid ? 'text-white/60 dark:text-zinc-900/60' : 'text-zinc-400 dark:text-zinc-500'
+        }`}
+      >
+        {label}
+      </span>
+      <span
+        className={`min-w-0 truncate ${
+          isAnswer ? 'text-base font-semibold' : 'text-[13px] font-medium'
+        } ${live && value === '…' ? 'animate-pulse-dot' : ''}`}
+      >
+        {value}
+      </span>
+    </div>
+  )
+}
+
+// ---- 通用卡片框 ----
+
+function Card({
+  title,
+  aside,
+  className = '',
+  bodyRef,
+  children,
+}: {
+  title: string
+  aside?: React.ReactNode
+  className?: string
+  bodyRef?: React.RefObject<HTMLDivElement | null>
+  children: React.ReactNode
+}) {
+  return (
+    <section
+      className={`flex min-h-0 animate-fade-up flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900 ${className}`}
+    >
+      <header className="flex h-10 shrink-0 items-center justify-between gap-3 border-b border-zinc-100 px-4 dark:border-zinc-800">
+        <h3 className="text-xs font-medium text-zinc-500 dark:text-zinc-400">{title}</h3>
+        {aside}
+      </header>
+      <div ref={bodyRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-3.5">
+        {children}
+      </div>
+    </section>
+  )
+}
+
+function SkeletonLines({ count = 3 }: { count?: number }) {
+  return (
+    <div className="animate-fade-in space-y-2.5" aria-label="加载中">
+      {Array.from({ length: count }, (_, i) => (
+        <div
+          key={i}
+          className="h-3 animate-pulse rounded bg-zinc-100 dark:bg-zinc-800"
+          style={{ width: i === count - 1 ? '55%' : `${88 - i * 12}%` }}
+        />
+      ))}
+    </div>
+  )
+}
+
+function EmptyHint({ text, hint }: { text: string; hint?: string }) {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-1 py-4 text-center">
+      <p className="text-xs text-zinc-500 dark:text-zinc-400">{text}</p>
+      {hint && <p className="text-[11px] text-zinc-400 dark:text-zinc-500">{hint}</p>}
+    </div>
+  )
+}
+
+// ---- 技巧应用：技巧在这道题里怎么用（不再列举依据） ----
+
+export function TechniquePanel({ result, loading, partial }: PanelProps) {
+  const streaming = loading && !!partial && partial.rules.length > 0
+  return (
+    <Card title="技巧应用" className="max-h-[42%] shrink-0">
+      {streaming ? (
+        <RulesBody rules={partial.rules} streaming />
+      ) : loading ? (
+        <SkeletonLines count={2} />
+      ) : !result ? (
+        <EmptyHint text="等待分析结果" hint="命中的讲义技巧及其用法会显示在这里" />
+      ) : (
+        <TechniqueBody result={result} />
+      )}
+    </Card>
+  )
+}
+
+function RulesBody({
+  rules,
+  streaming,
+}: {
+  rules: Array<{ name: string; section: string; usage: string }>
+  streaming?: boolean
+}) {
+  return (
+    <div className="space-y-4">
+      {rules.map((r, i) => (
+        <div key={i} className="animate-fade-up" style={{ animationDelay: `${i * 60}ms` }}>
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+            <h4 className="text-[13px] font-semibold text-zinc-900 dark:text-zinc-100">{r.name}</h4>
+            {r.section && (
+              <span className="text-[11px] text-zinc-400 dark:text-zinc-500">{r.section}</span>
+            )}
+          </div>
+          {r.usage ? (
+            <p className="mt-1 text-[13px] leading-6 text-zinc-600 dark:text-zinc-300">
+              {r.usage}
+              {streaming && i === rules.length - 1 && <Caret />}
+            </p>
+          ) : (
+            <p className="mt-1 text-[13px] text-zinc-400 dark:text-zinc-500">
+              正在生成用法…
+              {streaming && i === rules.length - 1 && <Caret />}
+            </p>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function TechniqueBody({ result }: { result: AnalysisResult }) {
+  const rules = normalizeRules(result)
+  if (rules.length === 0) {
+    return <EmptyHint text="本题未命中讲义技巧" hint="讲义中没有可直接套用的规则" />
+  }
+  return (
+    <div className="space-y-4">
+      {rules.map((r, i) => {
+        const application = r.application || r.usage || ''
+        return (
+          <div key={i} className="animate-fade-up" style={{ animationDelay: `${i * 60}ms` }}>
+            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+              <h4 className="text-[13px] font-semibold text-zinc-900 dark:text-zinc-100">
+                {r.name}
+              </h4>
+              {r.section && (
+                <span className="text-[11px] text-zinc-400 dark:text-zinc-500">{r.section}</span>
+              )}
+            </div>
+            {application ? (
+              <p className="mt-1 text-[13px] leading-6 text-zinc-600 dark:text-zinc-300">
+                {application}
+              </p>
+            ) : (
+              <p className="mt-1 text-[13px] text-zinc-400 dark:text-zinc-500">暂无用法说明</p>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ---- 注释和思路：技巧应用之外的剩余内容 ----
+
+export function AnnotationPanel({
+  result,
+  loading,
+  partial,
+  firstTokenMS = 0,
+  model,
+}: PanelProps) {
+  const meta = result?.meta
+  const hasMeta = !!meta && (meta.elapsed_ms > 0 || meta.total_tokens > 0)
+  const streamingText = loading ? (partial?.annotation || '') : ''
+  const elapsed = useElapsed(Boolean(loading))
+  const bodyRef = useRef<HTMLDivElement | null>(null)
+
+  // 流式输出时自动滚动到底部。
+  useEffect(() => {
+    const el = bodyRef.current
+    if (loading && el) el.scrollTop = el.scrollHeight
+  }, [streamingText, loading])
+
+  // 完成后的 meta 信息条：模型 · 首字 · 总用时 · tokens。
+  const metaAside = hasMeta ? (
+    <div className="tnum flex shrink-0 items-center gap-2 overflow-hidden text-[11px] text-zinc-400 dark:text-zinc-500">
+      {meta.model && (
+        <span className="truncate" title={`模型 ${meta.model}`}>
+          {meta.model}
+        </span>
+      )}
+      {meta.model && (meta.first_token_ms || meta.elapsed_ms > 0) && <span aria-hidden="true">·</span>}
+      {!!meta.first_token_ms && meta.first_token_ms > 0 && (
+        <span title="首字响应时间">首字 {(meta.first_token_ms / 1000).toFixed(1)}s</span>
+      )}
+      {meta.elapsed_ms > 0 && (
+        <>
+          {!!meta.first_token_ms && <span aria-hidden="true">·</span>}
+          <span title="处理耗时">{(meta.elapsed_ms / 1000).toFixed(1)}s</span>
+        </>
+      )}
+      {meta.total_tokens > 0 && (
+        <>
+          <span aria-hidden="true">·</span>
+          <span title="token 用量">{meta.total_tokens.toLocaleString()} tokens</span>
+        </>
+      )}
+    </div>
+  ) : undefined
+
+  // 流式中的 header：模型 · 首字 · 实时用时。
+  const liveAside = loading ? (
+    <div className="tnum flex shrink-0 items-center gap-2 overflow-hidden text-[11px] text-zinc-400 dark:text-zinc-500">
+      {model && (
+        <span className="truncate" title={`模型 ${model}`}>
+          {model}
+        </span>
+      )}
+      {model && <span aria-hidden="true">·</span>}
+      {firstTokenMS > 0 && (
+        <>
+          <span title="首字响应时间">首字 {(firstTokenMS / 1000).toFixed(1)}s</span>
+          <span aria-hidden="true">·</span>
+        </>
+      )}
+      <span>{elapsed}s</span>
+    </div>
+  ) : undefined
+
+  return (
+    <Card
+      title="注释和思路"
+      className="min-h-0 flex-1"
+      aside={loading ? liveAside : metaAside}
+      bodyRef={bodyRef}
+    >
+      {loading ? (
+        streamingText ? (
+          <p className="animate-fade-in text-sm leading-7 whitespace-pre-wrap text-zinc-700 dark:text-zinc-300">
+            {streamingText}
+            <Caret />
+          </p>
+        ) : (
+          <AnalyzingState />
+        )
+      ) : !result ? (
+        <EmptyHint text="等待分析结果" hint="完成分析后在这里查看解题思路" />
+      ) : result.annotation ? (
+        <p className="animate-fade-in text-sm leading-7 whitespace-pre-wrap text-zinc-700 dark:text-zinc-300">
+          {result.annotation}
+        </p>
+      ) : (
+        <p className="text-sm text-zinc-400 dark:text-zinc-500">暂无注释</p>
+      )}
+    </Card>
+  )
+}
+
+// 打字机光标。
+function Caret() {
+  return (
+    <span
+      className="ml-0.5 inline-block h-4 w-[2px] translate-y-[3px] animate-pulse-dot bg-zinc-800 dark:bg-zinc-200"
+      aria-hidden="true"
+    />
+  )
+}
+
+const STAGES = ['正在检索讲义相关章节…', '正在调用 AI 分析题目…', '正在等待模型输出…']
+
+// 首个 token 到达前的等待态：实时用时 + 阶段提示。
+function AnalyzingState() {
   const [stage, setStage] = useState(0)
+  const elapsed = useElapsed(true)
 
   useEffect(() => {
-    const timer = setInterval(() => {
+    const stageTimer = setInterval(() => {
       setStage((s) => Math.min(s + 1, STAGES.length - 1))
-    }, 1500)
-    return () => clearInterval(timer)
+    }, 4000)
+    return () => clearInterval(stageTimer)
   }, [])
 
   return (
-    <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm p-8 flex flex-col items-center justify-center">
-      <div className="relative w-12 h-12 mb-4">
-        <div className="absolute inset-0 rounded-full border-4 border-blue-200 dark:border-blue-800" />
-        <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-blue-600 animate-spin" />
-      </div>
-      <div className="text-sm text-gray-600 dark:text-gray-300">{STAGES[stage]}</div>
-      <div className="mt-3 flex gap-1.5">
+    <div className="flex h-full flex-col items-center justify-center gap-3">
+      <p className="tnum text-3xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+        {elapsed}s
+      </p>
+      <p className="text-xs text-zinc-500 dark:text-zinc-400">{STAGES[stage]}</p>
+      <div className="flex gap-1.5">
         {STAGES.map((_, i) => (
           <span
             key={i}
-            className={`w-1.5 h-1.5 rounded-full transition-colors ${
-              i <= stage ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-700'
+            className={`h-1.5 w-1.5 rounded-full transition-colors duration-300 ${
+              i === stage
+                ? 'animate-pulse-dot bg-zinc-900 dark:bg-zinc-100'
+                : i < stage
+                  ? 'bg-zinc-400 dark:bg-zinc-500'
+                  : 'bg-zinc-200 dark:bg-zinc-700'
             }`}
           />
         ))}

@@ -1,6 +1,8 @@
 package subject
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -86,5 +88,63 @@ func TestStoreNewMissingDir(t *testing.T) {
 	}
 	if len(s.List()) != 0 {
 		t.Errorf("List = %d, want 0", len(s.List()))
+	}
+}
+
+func TestTypeCatalog(t *testing.T) {
+	dir := t.TempDir()
+	md := `# 判断推理讲义
+
+## 第一章 逻辑判断
+
+### 1.1 翻译推理
+
+内容甲。
+
+### 1.2 真假推理
+
+内容乙。
+
+## 第二章 图形推理
+
+### 2.1 位置规律
+
+内容丙。
+`
+	if err := os.WriteFile(filepath.Join(dir, "判断推理.md"), []byte(md), 0o644); err != nil {
+		t.Fatalf("write md: %v", err)
+	}
+	s, err := NewStore(dir)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	got := s.TypeCatalog("判断推理", 10)
+	want := []string{"逻辑判断", "翻译推理", "真假推理", "图形推理", "位置规律"}
+	if len(got) != len(want) {
+		t.Fatalf("catalog = %q, want %q", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("catalog[%d] = %q, want %q (full=%q)", i, got[i], want[i], got)
+		}
+	}
+
+	if s.TypeCatalog("不存在", 10) != nil {
+		t.Errorf("missing subject should return nil catalog")
+	}
+}
+
+func TestCleanTypeTitle(t *testing.T) {
+	cases := map[string]string{
+		"第一章 逻辑判断":  "逻辑判断",
+		"1.1 翻译推理":  "翻译推理",
+		"一、位置规律":    "位置规律",
+		"整体介绍与题型分类": "整体介绍与题型分类",
+	}
+	for in, want := range cases {
+		if got := cleanTypeTitle(in); got != want {
+			t.Errorf("cleanTypeTitle(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

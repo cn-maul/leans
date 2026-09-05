@@ -3,38 +3,113 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-  --color-primary-50: #eef2ff;
-  --color-primary-100: #e0e7ff;
-  --color-primary-200: #c7d2fe;
-  --color-primary-300: #a5b4fc;
-  --color-primary-400: #818cf8;
-  --color-primary-500: #6366f1;
-  --color-primary-600: #4f46e5;
-  --color-primary-700: #4338ca;
-  --color-primary-800: #3730a3;
-  --color-primary-900: #312e81;
-
   --font-sans: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+
+  --animate-fade-up: fade-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-fade-in: fade-in 0.3s ease-out both;
+  --animate-progress-slide: progress-slide 1.3s cubic-bezier(0.45, 0, 0.2, 1) infinite;
+  --animate-pulse-dot: pulse-dot 1.4s ease-in-out infinite;
 }
 
-html,
-body {
-  margin: 0;
-  font-family: var(--font-sans);
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
-/* 细滚动条 */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* 顶部不确定进度条：一小段高亮从左滑到右循环。 */
+@keyframes progress-slide {
+  0% {
+    transform: translateX(-110%);
+  }
+  70% {
+    transform: translateX(380%);
+  }
+  100% {
+    transform: translateX(430%);
+  }
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@layer base {
+  html,
+  body {
+    margin: 0;
+    font-family: var(--font-sans);
+  }
+
+  body {
+    background-color: #fafafa;
+    color: #18181b;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  .dark body {
+    background-color: #09090b;
+    color: #e4e4e7;
+  }
+
+  ::selection {
+    background: rgb(113 113 122 / 0.3);
+  }
+
+  /* 数字（token/用时）用等宽数字，避免跳动。 */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+html {
+  scrollbar-width: thin;
+  scrollbar-color: #d4d4d8 transparent;
+}
+
+.dark {
+  scrollbar-color: #3f3f46 transparent;
+}
+
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
+
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 4px;
+  background: #d4d4d8;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background-clip: padding-box;
 }
+
 .dark ::-webkit-scrollbar-thumb {
-  background: #475569;
+  background: #3f3f46;
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
+
 ::-webkit-scrollbar-track {
   background: transparent;
 }

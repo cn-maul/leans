@@ -78,21 +78,25 @@ func TestSanitizeJSONBlock(t *testing.T) {
 
 func TestParseAnalysisResponse(t *testing.T) {
 	raw := "```json\n" + `{
-  "category": "中心理解",
-  "sub_category": "说理类-后对策结构",
+  "type_judgment": {
+    "category": "中心理解",
+    "sub_category": "说理类-后对策结构",
+    "basis": [
+      {"text": "意在说明", "location": "题干", "explanation": "主旨设问词"}
+    ]
+  },
+  "technique_judgment": {
+    "rules": [
+      {
+        "name": "对策标志词识别",
+        "section": "2.2",
+        "usage": "看到必须/应该优先找对策",
+        "example": "必须……",
+        "marks": [{"text": "必须", "location": "选项B", "explanation": "对策标志"}]
+      }
+    ]
+  },
   "answer": "B",
-  "basis": [
-    {"text": "意在说明", "location": "题干", "explanation": "主旨设问词"}
-  ],
-  "rules": [
-    {
-      "name": "对策标志词识别",
-      "section": "2.2",
-      "usage": "看到必须/应该优先找对策",
-      "example": "必须……",
-      "marks": [{"text": "必须", "location": "选项B", "explanation": "对策标志"}]
-    }
-  ],
   "annotation": "先找主旨句……",
   "highlights": [
     {"text": "意在说明", "type": "设问词", "module": "category", "location": "题干", "explanation": "判断题型"},
@@ -107,6 +111,9 @@ func TestParseAnalysisResponse(t *testing.T) {
 	if res.Category != "中心理解" {
 		t.Errorf("category = %q", res.Category)
 	}
+	if res.TypeJudgment == nil || res.TypeJudgment.Category != "中心理解" {
+		t.Errorf("type_judgment mismatch: %+v", res.TypeJudgment)
+	}
 	if res.Answer != "B" {
 		t.Errorf("answer = %q", res.Answer)
 	}
@@ -115,6 +122,9 @@ func TestParseAnalysisResponse(t *testing.T) {
 	}
 	if len(res.Rules) != 1 || len(res.Rules[0].Marks) != 1 {
 		t.Errorf("rules mismatch: %+v", res.Rules)
+	}
+	if res.TechniqueJudgment == nil || len(res.TechniqueJudgment.Rules) != 1 {
+		t.Errorf("technique_judgment mismatch: %+v", res.TechniqueJudgment)
 	}
 	byModule := map[string]int{}
 	for _, h := range res.Highlights {
@@ -144,11 +154,78 @@ func TestParseAnalysisResponseLegacy(t *testing.T) {
 	if len(res.Highlights) != 1 || res.Highlights[0].Color != "red" {
 		t.Errorf("legacy highlight color not normalized: %+v", res.Highlights)
 	}
+	if res.TypeJudgment == nil || res.TypeJudgment.Category != "中心理解" {
+		t.Errorf("legacy category not mapped to type_judgment: %+v", res.TypeJudgment)
+	}
+	if res.TechniqueJudgment == nil || len(res.TechniqueJudgment.Rules) != 1 {
+		t.Errorf("legacy applicable not mapped to technique_judgment: %+v", res.TechniqueJudgment)
+	}
 }
 
 func TestParseAnalysisResponseInvalid(t *testing.T) {
 	if _, err := ParseAnalysisResponse("完全不是 JSON"); err == nil {
 		t.Error("expected error for invalid JSON")
+	}
+}
+
+// TestRepairJSONCommas 覆盖"模型输出 JSON 漏逗号"的容错场景。
+func TestRepairJSONCommas(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			// 实际报错的形态：键值对之间漏逗号
+			"missing-comma-pairs",
+			`{"answer": "B" "annotation": "x"}`,
+			`{"answer": "B", "annotation": "x"}`,
+		},
+		{
+			"missing-comma-nested",
+			"{\"type_judgment\": {\"category\": \"中心理解\" \"sub_category\": \"说理类\"}}",
+			`{"type_judgment": {"category": "中心理解", "sub_category": "说理类"}}`,
+		},
+		{
+			// 多位数字不能被拆散
+			"valid-number-untouched",
+			`{"n": 12, "arr": [1, 2]}`,
+			`{"n": 12, "arr": [1, 2]}`,
+		},
+		{
+			"missing-comma-numbers",
+			`{"a": [1 2]}`,
+			`{"a": [1, 2]}`,
+		},
+		{
+			"missing-comma-object",
+			`{"a": {"b": 1} "c": 2}`,
+			`{"a": {"b": 1}, "c": 2}`,
+		},
+		{
+			// 字符串内部的引号与逗号不能误伤
+			"string-content-untouched",
+			`{"s": "a\"b, c\" d", "t": "x"}`,
+			`{"s": "a\"b, c\" d", "t": "x"}`,
+		},
+		{
+			// true/false/null 结尾后漏逗号
+			"missing-comma-literal",
+			`{"a": true "b": false}`,
+			`{"a": true, "b": false}`,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := repairJSONCommas(c.in)
+			if got != c.want {
+				t.Errorf("repairJSONCommas(%q) = %q, want %q", c.in, got, c.want)
+			}
+			var v any
+			if err := json.Unmarshal([]byte(got), &v); err != nil {
+				t.Errorf("repaired output not valid JSON: %v (%q)", err, got)
+			}
+		})
 	}
 }
 
@@ -185,7 +262,8 @@ func TestBuildAnalysisPrompt(t *testing.T) {
 		{Title: "第二章 / 2.1 说理类解题逻辑", Content: "对策标志词识别方法……"},
 		{Title: "第一章 总体概述", Content: "讲义整体框架说明……"},
 	}
-	msgs := BuildAnalysisPrompt("言语理解", hits, "这段文字意在强调什么？", false, 6000)
+	types := []string{"中心理解", "细节理解", "语句排序"}
+	msgs := BuildAnalysisPrompt("言语理解", hits, types, "这段文字意在强调什么？", false, 6000)
 	if len(msgs) != 2 {
 		t.Fatalf("messages = %d, want 2", len(msgs))
 	}
@@ -196,6 +274,15 @@ func TestBuildAnalysisPrompt(t *testing.T) {
 	if !strings.Contains(body, "说理类解题逻辑") {
 		t.Errorf("prompt missing lecture sections: %s", body[:200])
 	}
+	if !strings.Contains(body, "无视觉约束") {
+		t.Errorf("prompt missing no-vision constraint")
+	}
+	if !strings.Contains(body, "中心理解、细节理解、语句排序") {
+		t.Errorf("prompt missing type catalog: %s", body[:200])
+	}
+	if !strings.Contains(body, "看不到任何图片、图表、截图、公式或版式") {
+		t.Errorf("prompt no-vision constraint too weak")
+	}
 	if !strings.Contains(body, "这段文字意在强调什么？") {
 		t.Errorf("prompt missing question")
 	}
@@ -205,10 +292,33 @@ func TestBuildAnalysisPrompt(t *testing.T) {
 	}
 	// 讲义注入量受预算限制。
 	big := subject.Hit{Title: "第二章 对策题", Content: strings.Repeat("甲", 20000)}
-	msgs = BuildAnalysisPrompt("言语理解", []subject.Hit{big}, "题目", false, 6000)
+	msgs = BuildAnalysisPrompt("言语理解", []subject.Hit{big}, nil, "题目", false, 6000)
 	if len([]rune(msgs[1].Content)) > 10000 {
 		t.Errorf("lecture injection not capped: %d chars", len([]rune(msgs[1].Content)))
 	}
+	if !strings.Contains(msgs[1].Content, "未提供题型清单") {
+		t.Errorf("empty type catalog fallback missing")
+	}
 	// 题干不应超出注入上限（此处内容短，不会截断，但至少验证不 panic）。
 	_ = model.AnalyzeResponse{}
+}
+
+func TestSyncJudgmentsFromNested(t *testing.T) {
+	raw := `{
+  "type_judgment": {"category": "数量关系", "sub_category": "工程问题", "basis": [{"text": "甲队", "location": "题干"}]},
+  "technique_judgment": {"rules": [{"name": "赋值法", "section": "3.1", "marks": [{"text": "完成", "location": "选项A"}]}]}
+}`
+	res, err := ParseAnalysisResponse(raw)
+	if err != nil {
+		t.Fatalf("ParseAnalysisResponse: %v", err)
+	}
+	if res.Category != "数量关系" || len(res.Basis) != 1 {
+		t.Errorf("nested type_judgment not synced to legacy: %+v", res)
+	}
+	if len(res.Rules) != 1 || len(res.Rules[0].Marks) != 1 {
+		t.Errorf("nested technique_judgment not synced to legacy: %+v", res)
+	}
+	if res.TypeJudgment.Basis[0].Location != "题干" || res.Rules[0].Marks[0].Location != "选项A" {
+		t.Errorf("location not normalized: %+v / %+v", res.TypeJudgment.Basis, res.Rules)
+	}
 }

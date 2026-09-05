@@ -81,7 +81,15 @@ func TestSettingsRoundTrip(t *testing.T) {
 func TestHistoryCRUD(t *testing.T) {
 	s := newTestStore(t)
 
-	id, err := s.AddHistory("言语理解", "题目一", "中心理解", `{"category":"中心理解"}`)
+	id, err := s.AddHistory(model.HistoryItem{
+		Subject:      "言语理解",
+		Question:     "题目一",
+		Category:     "中心理解",
+		Result:       `{"category":"中心理解"}`,
+		Tokens:       1234,
+		ElapsedMS:    5600,
+		FirstTokenMS: 900,
+	})
 	if err != nil {
 		t.Fatalf("AddHistory: %v", err)
 	}
@@ -95,6 +103,9 @@ func TestHistoryCRUD(t *testing.T) {
 	}
 	if len(items) != 1 || items[0].Question != "题目一" || items[0].Category != "中心理解" {
 		t.Errorf("list mismatch: %+v", items)
+	}
+	if items[0].Tokens != 1234 || items[0].ElapsedMS != 5600 {
+		t.Errorf("tokens/elapsed mismatch: %+v", items[0])
 	}
 	if items[0].Result != "" {
 		t.Errorf("list should omit result, got %q", items[0].Result)
@@ -120,7 +131,7 @@ func TestHistoryCRUD(t *testing.T) {
 func TestHistoryLimit(t *testing.T) {
 	s := newTestStore(t)
 	for i := 0; i < 5; i++ {
-		if _, err := s.AddHistory("s", "q", "c", "{}"); err != nil {
+		if _, err := s.AddHistory(model.HistoryItem{Subject: "s", Question: "q", Category: "c", Result: "{}"}); err != nil {
 			t.Fatalf("AddHistory: %v", err)
 		}
 	}
@@ -130,6 +141,55 @@ func TestHistoryLimit(t *testing.T) {
 	}
 	if len(items) != 3 {
 		t.Errorf("limit not applied: %d items", len(items))
+	}
+}
+
+func TestStats(t *testing.T) {
+	s := newTestStore(t)
+
+	// 空库时统计应为零值。
+	st, err := s.GetStats()
+	if err != nil {
+		t.Fatalf("GetStats empty: %v", err)
+	}
+	if st.TotalQuestions != 0 || st.TotalTokens != 0 || st.AvgTokens != 0 {
+		t.Errorf("empty stats mismatch: %+v", st)
+	}
+
+	if _, err := s.AddHistory(model.HistoryItem{Subject: "s", Question: "q1", Category: "c", Result: "{}", Tokens: 1000, ElapsedMS: 5000, FirstTokenMS: 800}); err != nil {
+		t.Fatalf("AddHistory: %v", err)
+	}
+	if _, err := s.AddHistory(model.HistoryItem{Subject: "s", Question: "q2", Category: "c", Result: "{}", Tokens: 2000, ElapsedMS: 7000, FirstTokenMS: 1600}); err != nil {
+		t.Fatalf("AddHistory: %v", err)
+	}
+
+	st, err = s.GetStats()
+	if err != nil {
+		t.Fatalf("GetStats: %v", err)
+	}
+	if st.TotalQuestions != 2 {
+		t.Errorf("total_questions = %d, want 2", st.TotalQuestions)
+	}
+	if st.TotalTokens != 3000 {
+		t.Errorf("total_tokens = %d, want 3000", st.TotalTokens)
+	}
+	if st.AvgTokens != 1500 {
+		t.Errorf("avg_tokens = %v, want 1500", st.AvgTokens)
+	}
+	if st.AvgFirstTokenMS != 1200 {
+		t.Errorf("avg_first_token_ms = %v, want 1200", st.AvgFirstTokenMS)
+	}
+	if st.TotalElapsedMS != 12000 {
+		t.Errorf("total_elapsed_ms = %d, want 12000", st.TotalElapsedMS)
+	}
+
+	// 清空后统计归零。
+	if err := s.ClearHistory(); err != nil {
+		t.Fatalf("ClearHistory: %v", err)
+	}
+	st, _ = s.GetStats()
+	if st.TotalQuestions != 0 || st.TotalTokens != 0 {
+		t.Errorf("stats after clear: %+v", st)
 	}
 }
 
@@ -159,7 +219,7 @@ func TestMigrateAddsResultColumn(t *testing.T) {
 	}
 	defer store.Close()
 
-	if _, err := store.AddHistory("s", "q", "c", `{"ok":1}`); err != nil {
+	if _, err := store.AddHistory(model.HistoryItem{Subject: "s", Question: "q", Category: "c", Result: `{"ok":1}`}); err != nil {
 		t.Fatalf("AddHistory after migrate: %v", err)
 	}
 	got, err := store.GetHistory(1)

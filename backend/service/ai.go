@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/tls"
 	"encoding/json"
@@ -8,6 +9,7 @@ import (
 	"io"
 	"leans/model"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -64,56 +66,72 @@ func (s *AIService) Validate() error {
 		return err
 	}
 	if set.APIKey == "" {
-		return fmt.Errorf("未配置 API Key，请先在设置中填写")
+		return fmt.Errorf("%w: 未配置 API Key，请先在设置中填写", ErrNotConfigured)
 	}
 	if set.BaseURL == "" {
-		return fmt.Errorf("未配置 API Base URL")
+		return fmt.Errorf("%w: 未配置 API Base URL", ErrNotConfigured)
 	}
 	if set.Model == "" {
-		return fmt.Errorf("未配置模型名称")
+		return fmt.Errorf("%w: 未配置模型名称", ErrNotConfigured)
 	}
 	return nil
 }
 
-func (s *AIService) ChatCompletion(messages []model.ChatMessage) (string, *model.Usage, error) {
+// doChat 发送一次 chat/completions 请求，返回原始响应体。
+// 设置合并、请求构造、发送与状态码检查统一在此，ChatCompletion 与 Ping 共用。
+func (s *AIService) doChat(messages []model.ChatMessage, maxTokens int) ([]byte, error) {
 	set, err := s.Settings()
 	if err != nil {
-		return "", nil, fmt.Errorf("读取AI配置失败: %w", err)
+		return nil, fmt.Errorf("读取AI配置失败: %w", err)
 	}
 	if set.APIKey == "" {
-		return "", nil, fmt.Errorf("未配置 API Key，请先在设置中填写")
+		return nil, fmt.Errorf("%w: 未配置 API Key，请先在设置中填写", ErrNotConfigured)
+	}
+	if set.BaseURL == "" {
+		return nil, fmt.Errorf("%w: 未配置 API Base URL", ErrNotConfigured)
+	}
+	if set.Model == "" {
+		return nil, fmt.Errorf("%w: 未配置模型名称", ErrNotConfigured)
 	}
 
 	reqBody := model.ChatRequest{
 		Model:     set.Model,
 		Messages:  messages,
-		MaxTokens: s.maxTokens,
+		MaxTokens: maxTokens,
 	}
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", nil, fmt.Errorf("marshal request: %w", err)
+		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
 	url := set.BaseURL + "/chat/completions"
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
-		return "", nil, fmt.Errorf("create request: %w", err)
+		return nil, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+set.APIKey)
 
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return "", nil, fmt.Errorf("send request: %w", err)
+		return nil, fmt.Errorf("发送请求失败: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", nil, fmt.Errorf("read response: %w", err)
+		return nil, fmt.Errorf("读取响应失败: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", nil, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("API 错误 (status %d): %s", resp.StatusCode, string(body))
+	}
+	return body, nil
+}
+
+func (s *AIService) ChatCompletion(messages []model.ChatMessage) (string, *model.Usage, error) {
+	body, err := s.doChat(messages, s.maxTokens)
+	if err != nil {
+		return "", nil, err
 	}
 
 	var chatResp model.ChatResponse
@@ -127,56 +145,101 @@ func (s *AIService) ChatCompletion(messages []model.ChatMessage) (string, *model
 	return chatResp.Choices[0].Message.Content, chatResp.Usage, nil
 }
 
-// Ping 用当前配置发一个最小请求，验证 API Key / Base URL / 模型连通性。
-// 返回 nil 表示连接成功。
-func (s *AIService) Ping() error {
+// ChatCompletionStream 以 SSE 流式调用 chat/completions，每收到一段内容增量
+// 就调用一次 onDelta。返回完整内容、usage 统计，以及从请求发出到首个内容
+// 增量的耗时（首字响应时间，毫秒）。
+func (s *AIService) ChatCompletionStream(messages []model.ChatMessage, onDelta func(string)) (string, *model.Usage, int64, error) {
 	set, err := s.Settings()
 	if err != nil {
-		return err
+		return "", nil, 0, fmt.Errorf("读取AI配置失败: %w", err)
 	}
-	if set.APIKey == "" {
-		return fmt.Errorf("未配置 API Key")
-	}
-	if set.BaseURL == "" {
-		return fmt.Errorf("未配置 API Base URL")
-	}
-	if set.Model == "" {
-		return fmt.Errorf("未配置模型名称")
+	if err := s.Validate(); err != nil {
+		return "", nil, 0, err
 	}
 
 	reqBody := model.ChatRequest{
-		Model: set.Model,
-		Messages: []model.ChatMessage{{
-			Role:    "user",
-			Content: "ping",
-		}},
-		MaxTokens: 1,
+		Model:         set.Model,
+		Messages:      messages,
+		MaxTokens:     s.maxTokens,
+		Stream:        true,
+		StreamOptions: &model.StreamOptions{IncludeUsage: true},
 	}
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
-		return fmt.Errorf("marshal request: %w", err)
+		return "", nil, 0, fmt.Errorf("marshal request: %w", err)
 	}
 
 	url := set.BaseURL + "/chat/completions"
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
-		return fmt.Errorf("create request: %w", err)
+		return "", nil, 0, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+set.APIKey)
 
+	start := time.Now()
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("连接失败: %w", err)
+		return "", nil, 0, fmt.Errorf("发送请求失败: %w", err)
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("读取响应失败: %w", err)
-	}
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("API 错误 (status %d): %s", resp.StatusCode, string(body))
+		body, _ := io.ReadAll(resp.Body)
+		return "", nil, 0, fmt.Errorf("API 错误 (status %d): %s", resp.StatusCode, string(body))
 	}
-	return nil
+
+	var content strings.Builder
+	var usage *model.Usage
+	var firstTokenMS int64
+
+	reader := bufio.NewReader(resp.Body)
+	for {
+		line, readErr := reader.ReadString('\n')
+		line = strings.TrimRight(line, "\r\n")
+
+		if strings.HasPrefix(line, "data:") {
+			payload := strings.TrimSpace(line[len("data:"):])
+			if payload == "[DONE]" {
+				break
+			}
+			var chunk model.ChatStreamChunk
+			if json.Unmarshal([]byte(payload), &chunk) == nil {
+				if chunk.Usage != nil {
+					usage = chunk.Usage
+				}
+				if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
+					if firstTokenMS == 0 {
+						firstTokenMS = time.Since(start).Milliseconds()
+					}
+					content.WriteString(chunk.Choices[0].Delta.Content)
+					if onDelta != nil {
+						onDelta(chunk.Choices[0].Delta.Content)
+					}
+				}
+			}
+		}
+
+		if readErr != nil {
+			if readErr == io.EOF {
+				break
+			}
+			return content.String(), usage, firstTokenMS, fmt.Errorf("读取流式响应失败: %w", readErr)
+		}
+	}
+
+	if content.Len() == 0 {
+		return "", usage, firstTokenMS, fmt.Errorf("流式响应中没有内容")
+	}
+	return content.String(), usage, firstTokenMS, nil
+}
+
+// Ping 用当前配置发一个最小请求，验证 API Key / Base URL / 模型连通性。
+// 返回 nil 表示连接成功。
+func (s *AIService) Ping() error {
+	_, err := s.doChat([]model.ChatMessage{{
+		Role:    "user",
+		Content: "ping",
+	}}, 1)
+	return err
 }

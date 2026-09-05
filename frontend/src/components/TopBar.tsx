@@ -1,99 +1,138 @@
-import type { Subject, Theme } from '../types/analysis'
+import { BarChart3, History, Moon, PenLine, Settings, Sun } from 'lucide-react'
+import type { Theme } from '../types/analysis'
+
+export type View = 'analyze' | 'stats'
 
 interface Props {
-  subjects: Subject[]
-  selectedSubject: string
-  onSelectSubject: (id: string) => void
-  onOpenLecture: () => void
+  lectureName: string
+  view: View
+  onViewChange: (v: View) => void
   onOpenHistory: () => void
   onOpenSettings: () => void
   theme: Theme
   onToggleTheme: () => void
+  running: boolean
 }
 
-// TopBar 是顶栏导航：品牌 + 科目下拉 + 工具入口（讲义/历史/设置/主题）。
 export default function TopBar({
-  subjects,
-  selectedSubject,
-  onSelectSubject,
-  onOpenLecture,
+  lectureName,
+  view,
+  onViewChange,
   onOpenHistory,
   onOpenSettings,
   theme,
   onToggleTheme,
+  running,
 }: Props) {
   return (
-    <header className="sticky top-0 z-40 bg-white/90 dark:bg-gray-900/90 backdrop-blur border-b border-gray-200 dark:border-gray-800">
-      <div className="max-w-[1440px] mx-auto px-6 py-3 flex items-center gap-4">
-        {/* 品牌 */}
-        <div className="flex items-center gap-2.5 mr-2 shrink-0">
-          <span className="text-2xl leading-none">📚</span>
-          <div>
-            <h1 className="font-bold text-gray-900 dark:text-gray-100 leading-tight">
-              公考题目分析
-            </h1>
-            <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-tight">
-              基于讲义的智能解析
-            </p>
+    <header className="relative shrink-0 border-b border-zinc-200 bg-white/85 backdrop-blur-xl dark:border-zinc-800 dark:bg-zinc-950/85">
+      <div className="mx-auto flex h-14 w-full max-w-[1680px] items-center gap-3 px-5">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-zinc-900 text-[13px] font-bold text-white dark:bg-zinc-100 dark:text-zinc-900">
+            析
           </div>
-        </div>
-
-        {/* 科目下拉 */}
-        <div className="min-w-0 flex-1 max-w-xs">
-          <label className="sr-only" htmlFor="subject-select">
-            选择科目
-          </label>
-          <select
-            id="subject-select"
-            value={selectedSubject}
-            onChange={(e) => onSelectSubject(e.target.value)}
-            className="w-full px-3 py-2 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+          <h1 className="truncate text-[15px] font-semibold tracking-tight text-zinc-900 dark:text-white">
+            公考题目分析
+          </h1>
+          <span
+            className="hidden items-center gap-1 rounded-full border border-zinc-200 px-2.5 py-0.5 text-[11px] text-zinc-500 md:inline-flex dark:border-zinc-800 dark:text-zinc-400"
+            title="当前使用的讲义"
           >
-            <option value="">选择科目…</option>
-            {subjects.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
+            {lectureName}
+          </span>
         </div>
 
-        <div className="flex-1" />
+        <div className="ml-auto flex items-center gap-1.5">
+          <nav className="flex items-center rounded-lg bg-zinc-100 p-0.5 dark:bg-zinc-800/80">
+            <ViewTab
+              active={view === 'analyze'}
+              onClick={() => onViewChange('analyze')}
+              icon={<PenLine className="h-3.5 w-3.5" aria-hidden="true" />}
+              label="分析"
+            />
+            <ViewTab
+              active={view === 'stats'}
+              onClick={() => onViewChange('stats')}
+              icon={<BarChart3 className="h-3.5 w-3.5" aria-hidden="true" />}
+              label="统计"
+            />
+          </nav>
 
-        {/* 工具按钮 */}
-        <div className="flex items-center gap-1.5">
-          <ToolButton onClick={onOpenLecture} label="讲义" icon="📖" />
-          <ToolButton onClick={onOpenHistory} label="历史" icon="🕘" />
-          <ToolButton onClick={onOpenSettings} label="设置" icon="⚙" />
-          <button
+          <span className="mx-1 h-5 w-px bg-zinc-200 dark:bg-zinc-800" aria-hidden="true" />
+
+          <IconButton onClick={onOpenHistory} label="历史">
+            <History className="h-4 w-4" aria-hidden="true" />
+          </IconButton>
+          <IconButton onClick={onOpenSettings} label="设置">
+            <Settings className="h-4 w-4" aria-hidden="true" />
+          </IconButton>
+          <IconButton
             onClick={onToggleTheme}
-            className="px-2.5 py-2 text-sm rounded-lg bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
-            title={theme === 'light' ? '切换到暗色模式' : '切换到亮色模式'}
+            label={theme === 'light' ? '切换到暗色模式' : '切换到亮色模式'}
           >
-            {theme === 'light' ? '🌙' : '☀️'}
-          </button>
+            {theme === 'light' ? (
+              <Moon className="h-4 w-4" aria-hidden="true" />
+            ) : (
+              <Sun className="h-4 w-4" aria-hidden="true" />
+            )}
+          </IconButton>
         </div>
       </div>
+
+      {/* 分析进行中：顶栏底部的不确定进度条 */}
+      {running && (
+        <div className="absolute inset-x-0 bottom-0 overflow-hidden" aria-hidden="true">
+          <div className="h-0.5 w-1/4 rounded-full bg-zinc-900 animate-progress-slide dark:bg-zinc-100" />
+        </div>
+      )}
     </header>
   )
 }
 
-function ToolButton({
+function ViewTab({
+  active,
   onClick,
-  label,
   icon,
+  label,
 }: {
+  active: boolean
   onClick: () => void
+  icon: React.ReactNode
   label: string
-  icon: string
 }) {
   return (
     <button
       onClick={onClick}
-      className="px-2.5 py-2 text-sm rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors flex items-center gap-1"
+      className={`inline-flex h-7 items-center gap-1.5 rounded-md px-3 text-[13px] font-medium transition-all ${
+        active
+          ? 'bg-white text-zinc-900 shadow-sm dark:bg-zinc-600 dark:text-white'
+          : 'text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200'
+      }`}
+      aria-pressed={active}
     >
-      <span>{icon}</span>
-      <span className="hidden sm:inline">{label}</span>
+      {icon}
+      {label}
+    </button>
+  )
+}
+
+function IconButton({
+  onClick,
+  label,
+  children,
+}: {
+  onClick: () => void
+  label: string
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+    >
+      {children}
     </button>
   )
 }
