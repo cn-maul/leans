@@ -25,7 +25,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       headers: init?.body ? { 'Content-Type': 'application/json' } : undefined,
       ...init,
     })
-  } catch {
+  } catch (e) {
+    // 用户主动取消时保留 AbortError，供调用方识别。
+    if (e instanceof DOMException && e.name === 'AbortError') throw e
     throw new ApiError('网络请求失败，请检查服务是否在运行', 0)
   }
 
@@ -50,10 +52,15 @@ export function fetchStats(): Promise<Stats> {
   return request<Stats>('/stats')
 }
 
-export function analyzeQuestion(subject: string, content: string): Promise<AnalysisResult> {
+export function analyzeQuestion(
+  subject: string,
+  content: string,
+  signal?: AbortSignal,
+): Promise<AnalysisResult> {
   return request<AnalysisResult>('/analyze', {
     method: 'POST',
     body: JSON.stringify({ subject, content }),
+    signal,
   })
 }
 
@@ -64,11 +71,13 @@ export interface StreamHandlers {
 }
 
 // analyzeQuestionStream 调用 SSE 流式分析端点，delta 事件实时回调，
-// 最终以 done 事件中的规范化结果 resolve。非 SSE 响应（旧后端）抛出 404 供调用方回退。
+// 最终以 done 事件中的规范化结果 resolve。signal 取消时以 AbortError 拒绝。
+// 非 SSE 响应（旧后端）抛出 404 供调用方回退。
 export async function analyzeQuestionStream(
   subject: string,
   content: string,
   handlers: StreamHandlers,
+  signal?: AbortSignal,
 ): Promise<AnalysisResult> {
   let resp: Response
   try {
@@ -76,8 +85,10 @@ export async function analyzeQuestionStream(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ subject, content }),
+      signal,
     })
-  } catch {
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') throw e
     throw new ApiError('网络请求失败，请检查服务是否在运行', 0)
   }
 
@@ -145,8 +156,38 @@ export function saveSettings(settings: AISettings): Promise<AISettings> {
   })
 }
 
-export function testConnection(): Promise<{ ok: boolean }> {
-  return request<{ ok: boolean }>('/settings/test', { method: 'POST' })
+// setActiveSelection 切换主界面二级下拉的当前供应商与模型；model 传空
+// 字符串表示由后端自动选中该供应商下的有效模型。
+export function setActiveSelection(providerId: string, model: string): Promise<AISettings> {
+  return request<AISettings>('/settings/active', {
+    method: 'POST',
+    body: JSON.stringify({ provider_id: providerId, model }),
+  })
+}
+
+// fetchProviderModels 用表单凭据在线获取模型列表（服务端 GET /models）。
+export function fetchProviderModels(
+  baseUrl: string,
+  apiKey: string,
+  protocol: string,
+): Promise<{ models: string[] }> {
+  return request<{ models: string[] }>('/settings/models', {
+    method: 'POST',
+    body: JSON.stringify({ base_url: baseUrl, api_key: apiKey, protocol }),
+  })
+}
+
+// testConnection 测试连接：传入 provider 时测试表单配置（可不保存），
+// 否则测试当前激活的供应商。
+export function testConnection(
+  provider?: { name?: string; base_url: string; api_key: string; protocol?: string },
+  model?: string,
+): Promise<{ ok: boolean }> {
+  const body = provider ? { provider, model } : {}
+  return request<{ ok: boolean }>('/settings/test', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
 }
 
 export function fetchHistory(): Promise<HistoryItem[]> {

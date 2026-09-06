@@ -39,11 +39,19 @@ func main() {
 	list := subjects.List()
 	log.Printf("Loaded %d subjects", len(list))
 
-	defaults := model.AISettings{
-		Provider: cfg.AI.Provider,
-		APIKey:   cfg.AI.APIKey,
-		BaseURL:  cfg.AI.BaseURL,
-		Model:    cfg.AI.Model,
+	// config.yaml 的 AI 配置作为种子供应商；用户在界面保存设置后被
+	// 持久化的多供应商配置完全取代。
+	var defaults model.AISettings
+	if cfg.AI.BaseURL != "" {
+		defaults.Providers = []model.AIProvider{{
+			ID:      "default",
+			Name:    cfg.AI.Provider,
+			BaseURL: cfg.AI.BaseURL,
+			APIKey:  cfg.AI.APIKey,
+			Models:  []string{cfg.AI.Model},
+		}}
+		defaults.ActiveProviderID = "default"
+		defaults.ActiveModel = cfg.AI.Model
 	}
 
 	ai := service.NewAIService(defaults, store.GetSettings, cfg.Analysis.MaxTokens)
@@ -77,6 +85,8 @@ func main() {
 		settingsHandler := handler.NewSettingsHandler(store, ai)
 		api.GET("/settings", settingsHandler.Get)
 		api.PUT("/settings", settingsHandler.Put)
+		api.POST("/settings/active", settingsHandler.Active)
+		api.POST("/settings/models", settingsHandler.Models)
 		api.POST("/settings/test", settingsHandler.Test)
 
 		historyHandler := handler.NewHistoryHandler(store)

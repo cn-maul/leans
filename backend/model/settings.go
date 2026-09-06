@@ -1,11 +1,40 @@
 package model
 
-// AISettings represents the AI provider configuration editable from the UI.
+// 支持的接口协议。auto 表示按端点主动探测（rosetta DetectProtocol），
+// 其余值与 rosetta 的 Protocol 常量一一对应。
+const (
+	ProtocolAuto            = "auto"
+	ProtocolOpenAIChat      = "openai-chat"      // OpenAI Chat Completions（绝大多数兼容服务）
+	ProtocolOpenAIResponses = "openai-responses" // OpenAI Responses API
+	ProtocolAnthropic       = "anthropic"        // Anthropic Messages API
+)
+
+// ValidProtocol 报告协议取值是否合法（空串视为 auto）。
+func ValidProtocol(p string) bool {
+	switch p {
+	case "", ProtocolAuto, ProtocolOpenAIChat, ProtocolOpenAIResponses, ProtocolAnthropic:
+		return true
+	}
+	return false
+}
+
+// AIProvider 是一个可切换的 AI 服务接入点：一个 endpoint + 凭证 +
+// 该服务下可用的模型列表。模型可手动维护，也可从服务端在线获取。
+type AIProvider struct {
+	ID       string   `json:"id"`
+	Name     string   `json:"name"`
+	BaseURL  string   `json:"base_url"`
+	APIKey   string   `json:"api_key"`
+	Protocol string   `json:"protocol"`
+	Models   []string `json:"models"`
+}
+
+// AISettings 多供应商设置。ActiveProviderID/ActiveModel 是主界面二级
+// 下拉的当前选择；Providers 为空表示尚未配置任何 AI 服务。
 type AISettings struct {
-	Provider string `json:"provider"`
-	APIKey   string `json:"api_key"`
-	BaseURL  string `json:"base_url"`
-	Model    string `json:"model"`
+	ActiveProviderID string       `json:"active_provider_id"`
+	ActiveModel      string       `json:"active_model"`
+	Providers        []AIProvider `json:"providers"`
 }
 
 // History record of a single analysis run.

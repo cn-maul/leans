@@ -59,6 +59,8 @@ func newTestEnv(t *testing.T) (*gin.Engine, *storage.Store) {
 		sth := NewSettingsHandler(store, ai)
 		api.GET("/settings", sth.Get)
 		api.PUT("/settings", sth.Put)
+		api.POST("/settings/active", sth.Active)
+		api.POST("/settings/models", sth.Models)
 		api.POST("/settings/test", sth.Test)
 
 		hh := NewHistoryHandler(store)
@@ -194,8 +196,8 @@ func TestAnalyzeNotConfigured(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 (AI 未配置), body %s", w.Code, w.Body.String())
 	}
-	if msg := decodeError(t, w); !strings.Contains(msg, "API Key") {
-		t.Errorf("error = %q, want 提示配置 API Key", msg)
+	if msg := decodeError(t, w); !strings.Contains(msg, "供应商") {
+		t.Errorf("error = %q, want 提示配置 AI 供应商", msg)
 	}
 }
 
@@ -213,8 +215,8 @@ func TestAnalyzeStreamNotConfigured(t *testing.T) {
 	if !strings.Contains(body, "event: error") {
 		t.Errorf("SSE body missing error event: %s", body)
 	}
-	if !strings.Contains(body, "API Key") {
-		t.Errorf("SSE error should mention API Key: %s", body)
+	if !strings.Contains(body, "供应商") {
+		t.Errorf("SSE error should mention 供应商: %s", body)
 	}
 }
 
@@ -229,12 +231,12 @@ func TestSettingsGetPut(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if got.APIKey != "" {
-		t.Errorf("default api_key = %q, want empty", got.APIKey)
+	if len(got.Providers) != 0 {
+		t.Errorf("default providers = %+v, want empty", got.Providers)
 	}
 
 	w = doJSON(t, r, http.MethodPut, "/api/settings",
-		`{"provider":"deepseek","api_key":"sk-x","base_url":"https://api.deepseek.com/v1","model":"deepseek-chat"}`)
+		`{"active_provider_id":"p1","active_model":"deepseek-chat","providers":[{"id":"p1","name":"DeepSeek","base_url":"https://api.deepseek.com/v1","api_key":"sk-x","models":["deepseek-chat"]}]}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("put status = %d, body %s", w.Code, w.Body.String())
 	}
@@ -243,8 +245,81 @@ func TestSettingsGetPut(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSettings: %v", err)
 	}
-	if persisted.Provider != "deepseek" || persisted.Model != "deepseek-chat" || persisted.APIKey != "sk-x" {
+	if persisted.ActiveProviderID != "p1" || len(persisted.Providers) != 1 ||
+		persisted.Providers[0].APIKey != "sk-x" || persisted.Providers[0].Models[0] != "deepseek-chat" {
 		t.Errorf("persisted settings mismatch: %+v", persisted)
+	}
+}
+
+// TestSettingsActive 切换激活供应商/模型，未知供应商返回 400。
+func TestSettingsActive(t *testing.T) {
+	r, store := newTestEnv(t)
+
+	in := `{"active_provider_id":"p1","active_model":"m1","providers":[` +
+		`{"id":"p1","name":"A","base_url":"https://a/v1","api_key":"k","models":["m1","m2"]},` +
+		`{"id":"p2","name":"B","base_url":"https://b/v1","api_key":"k","models":["m9"]}]}`
+	if w := doJSON(t, r, http.MethodPut, "/api/settings", in); w.Code != http.StatusOK {
+		t.Fatalf("put status = %d, body %s", w.Code, w.Body.String())
+	}
+
+	// 切换供应商不传 model → 自动选中该供应商第一个模型。
+	w := doJSON(t, r, http.MethodPost, "/api/settings/active", `{"provider_id":"p2"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("active status = %d, body %s", w.Code, w.Body.String())
+	}
+	persisted, err := store.GetSettings()
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	if persisted.ActiveProviderID != "p2" || persisted.ActiveModel != "m9" {
+		t.Errorf("after switch: %+v", persisted)
+	}
+
+	// 显式传 model。
+	w = doJSON(t, r, http.MethodPost, "/api/settings/active", `{"provider_id":"p2","model":"m9"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("active status = %d, body %s", w.Code, w.Body.String())
+	}
+
+	// 未知供应商。
+	w = doJSON(t, r, http.MethodPost, "/api/settings/active", `{"provider_id":"nope"}`)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("unknown provider status = %d, want 400", w.Code)
+	}
+}
+
+// TestSettingsModels 用 mock 上游验证在线获取模型列表。
+func TestSettingsModels(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"model-a"},{"id":"model-b"}]}`))
+	}))
+	defer upstream.Close()
+
+	r, _ := newTestEnv(t)
+	w := doJSON(t, r, http.MethodPost, "/api/settings/models",
+		`{"base_url":"`+upstream.URL+`","api_key":"sk-x"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("models status = %d, body %s", w.Code, w.Body.String())
+	}
+	var got struct {
+		Models []string `json:"models"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got.Models) != 2 || got.Models[0] != "model-a" || got.Models[1] != "model-b" {
+		t.Errorf("models = %v", got.Models)
+	}
+
+	// 缺 base_url → 400。
+	w = doJSON(t, r, http.MethodPost, "/api/settings/models", `{"api_key":"k"}`)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("missing base_url status = %d, want 400", w.Code)
 	}
 }
 
@@ -262,7 +337,7 @@ func TestSettingsTestNotConfigured(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 (未配置), body %s", w.Code, w.Body.String())
 	}
-	if msg := decodeError(t, w); !strings.Contains(msg, "API Key") {
+	if msg := decodeError(t, w); !strings.Contains(msg, "供应商") {
 		t.Errorf("error = %q", msg)
 	}
 }

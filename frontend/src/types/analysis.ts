@@ -3,11 +3,21 @@ export interface Subject {
   name: string
 }
 
-export interface AISettings {
-  provider: string
-  api_key: string
+// AIProvider 是一个可切换的 AI 服务接入点；models 可手动维护或在线获取。
+// protocol 取值与后端 model 包常量一致：auto / openai-chat / openai-responses / anthropic。
+export interface AIProvider {
+  id: string
+  name: string
   base_url: string
-  model: string
+  api_key: string
+  protocol: string
+  models: string[]
+}
+
+export interface AISettings {
+  active_provider_id: string
+  active_model: string
+  providers: AIProvider[]
 }
 
 export interface HistoryItem {

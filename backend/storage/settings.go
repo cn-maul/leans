@@ -1,43 +1,74 @@
 package storage
 
-import "leans/model"
+import (
+	"encoding/json"
+	"fmt"
 
-// GetSettings reads persisted AI settings from the DB. Missing keys are
-// returned as empty strings so the caller can fall back to defaults.
+	"leans/model"
+)
+
+// settingsKey 保存多供应商设置的完整 JSON；旧版本按字段拆成多行存储，
+// 读取时自动迁移为单供应商，保存时删除旧行。
+const settingsKey = "ai_settings"
+
 func (s *Store) GetSettings() (model.AISettings, error) {
-	var out model.AISettings
 	rows, err := s.db.Query("SELECT key, value FROM settings")
 	if err != nil {
-		return out, err
+		return model.AISettings{}, err
 	}
 	defer rows.Close()
 
+	kv := map[string]string{}
 	for rows.Next() {
 		var k, v string
 		if err := rows.Scan(&k, &v); err != nil {
-			return out, err
+			return model.AISettings{}, err
 		}
-		switch k {
-		case "provider":
-			out.Provider = v
-		case "api_key":
-			out.APIKey = v
-		case "base_url":
-			out.BaseURL = v
-		case "model":
-			out.Model = v
-		}
+		kv[k] = v
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return model.AISettings{}, err
+	}
+
+	if raw, ok := kv[settingsKey]; ok {
+		var out model.AISettings
+		if err := json.Unmarshal([]byte(raw), &out); err != nil {
+			return model.AISettings{}, fmt.Errorf("parse settings: %w", err)
+		}
+		return out, nil
+	}
+	return migrateLegacySettings(kv), nil
 }
 
-// SaveSettings upserts all AI setting fields.
+// migrateLegacySettings 把旧版单供应商字段迁移为多供应商结构。
+func migrateLegacySettings(kv map[string]string) model.AISettings {
+	p := model.AIProvider{
+		ID:      "default",
+		Name:    kv["provider"],
+		BaseURL: kv["base_url"],
+		APIKey:  kv["api_key"],
+	}
+	if p.Name == "" {
+		p.Name = "默认供应商"
+	}
+	if m := kv["model"]; m != "" {
+		p.Models = []string{m}
+	}
+	if p.BaseURL == "" && p.APIKey == "" && len(p.Models) == 0 {
+		return model.AISettings{}
+	}
+	return model.AISettings{
+		ActiveProviderID: p.ID,
+		ActiveModel:      kv["model"],
+		Providers:        []model.AIProvider{p},
+	}
+}
+
+// SaveSettings 以整体 JSON 持久化多供应商设置，并清理旧版字段行。
 func (s *Store) SaveSettings(set model.AISettings) error {
-	vals := map[string]string{
-		"provider": set.Provider,
-		"api_key":  set.APIKey,
-		"base_url": set.BaseURL,
-		"model":    set.Model,
+	data, err := json.Marshal(set)
+	if err != nil {
+		return fmt.Errorf("marshal settings: %w", err)
 	}
 
 	tx, err := s.db.Begin()
@@ -46,12 +77,15 @@ func (s *Store) SaveSettings(set model.AISettings) error {
 	}
 	defer tx.Rollback()
 
-	for k, v := range vals {
-		if _, err := tx.Exec(
-			`INSERT INTO settings (key, value) VALUES (?, ?)
-			 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-			k, v,
-		); err != nil {
+	if _, err := tx.Exec(
+		`INSERT INTO settings (key, value) VALUES (?, ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+		settingsKey, string(data),
+	); err != nil {
+		return err
+	}
+	for _, k := range []string{"provider", "api_key", "base_url", "model"} {
+		if _, err := tx.Exec(`DELETE FROM settings WHERE key = ?`, k); err != nil {
 			return err
 		}
 	}

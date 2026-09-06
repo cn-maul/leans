@@ -61,8 +61,17 @@ export function useAnalysis() {
   const [liveModel, setLiveModel] = useState('')
   const [liveFirstTokenMS, setLiveFirstTokenMS] = useState(0)
   const firstTokenAtRef = useRef(0)
+  const abortRef = useRef<AbortController | null>(null)
+
+  const isAbort = (e: unknown) =>
+    e instanceof DOMException && e.name === 'AbortError'
 
   const run = useCallback(async (subject: string, question: string) => {
+    // 新的一次运行会替换旧的 controller；旧请求若仍在飞行中先中止。
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+
     setStage('running')
     setError('')
     setPartial(null)
@@ -73,20 +82,25 @@ export function useAnalysis() {
     const acc = { text: '' }
 
     try {
-      const res = await api.analyzeQuestionStream(subject, question, {
-        onModel: (m) => setLiveModel(m),
-        onDelta: (text) => {
-          if (firstTokenAtRef.current === 0) {
-            firstTokenAtRef.current = Date.now()
-            setLiveFirstTokenMS(Date.now() - startedAt)
-          }
-          acc.text += text
-          setPartial(parsePartial(acc.text))
+      const res = await api.analyzeQuestionStream(
+        subject,
+        question,
+        {
+          onModel: (m) => setLiveModel(m),
+          onDelta: (text) => {
+            if (firstTokenAtRef.current === 0) {
+              firstTokenAtRef.current = Date.now()
+              setLiveFirstTokenMS(Date.now() - startedAt)
+            }
+            acc.text += text
+            setPartial(parsePartial(acc.text))
+          },
+          onStatus: () => {
+            /* 状态提示（解析失败重试）在注释卡内以阶段文案体现 */
+          },
         },
-        onStatus: () => {
-          /* 状态提示（解析失败重试）在注释卡内以阶段文案体现 */
-        },
-      })
+        controller.signal,
+      )
       setResult(res)
       setStage('done')
       return res
@@ -94,20 +108,32 @@ export function useAnalysis() {
       // 旧版后端无流式端点时回退非流式接口。
       if (e instanceof api.ApiError && e.status === 404) {
         try {
-          const res = await api.analyzeQuestion(subject, question)
+          const res = await api.analyzeQuestion(subject, question, controller.signal)
           setResult(res)
           setStage('done')
           return res
         } catch (e2) {
+          if (isAbort(e2)) return null
           setError(e2 instanceof Error ? e2.message : '分析失败')
           setStage('idle')
           return null
         }
       }
+      if (isAbort(e)) {
+        // 用户中止：静默回到初始态，已收到的部分结果一并丢弃。
+        setPartial(null)
+        setStage('idle')
+        return null
+      }
       setError(e instanceof Error ? e.message : '分析失败')
       setStage('idle')
       return null
     }
+  }, [])
+
+  // cancel 中止进行中的分析；后端会随连接断开取消 AI 调用。
+  const cancel = useCallback(() => {
+    abortRef.current?.abort()
   }, [])
 
   const reset = useCallback(() => {
@@ -119,5 +145,5 @@ export function useAnalysis() {
     setLiveFirstTokenMS(0)
   }, [])
 
-  return { result, stage, error, run, reset, setResult, partial, liveModel, liveFirstTokenMS }
+  return { result, stage, error, run, cancel, reset, setResult, partial, liveModel, liveFirstTokenMS }
 }

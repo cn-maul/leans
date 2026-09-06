@@ -176,45 +176,17 @@ type Subject struct {
 	Content  string `json:"-"`
 }
 
+// ChatMessage 是应用层的对话消息；线上协议的编解码由 rosetta 负责。
 type ChatMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
 }
 
-type ChatRequest struct {
-	Model         string         `json:"model"`
-	Messages      []ChatMessage  `json:"messages"`
-	MaxTokens     int            `json:"max_tokens,omitempty"`
-	Temperature   float64        `json:"temperature,omitempty"`
-	Stream        bool           `json:"stream,omitempty"`
-	StreamOptions *StreamOptions `json:"stream_options,omitempty"`
-}
-
-// StreamOptions 请求流式响应时附带 usage 统计（OpenAI 兼容约定）。
-type StreamOptions struct {
-	IncludeUsage bool `json:"include_usage"`
-}
-
-// ChatStreamChunk 是流式响应中的单个 SSE data 块。
-type ChatStreamChunk struct {
-	Choices []struct {
-		Delta        ChatMessage `json:"delta"`
-		FinishReason *string     `json:"finish_reason,omitempty"`
-	} `json:"choices"`
-	Usage *Usage `json:"usage,omitempty"`
-}
-
+// Usage 记录一次调用的 token 用量。
 type Usage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
-}
-
-type ChatResponse struct {
-	Choices []struct {
-		Message ChatMessage `json:"message"`
-	} `json:"choices"`
-	Usage *Usage `json:"usage,omitempty"`
 }
 
 // ToJSON serializes the response for persistence in history records.

@@ -27,12 +27,16 @@ func (h *AnalyzeHandler) Handle(c *gin.Context) {
 		return
 	}
 
-	result, err := h.analyzer.Analyze(service.AnalyzeOption{
+	result, err := h.analyzer.Analyze(c.Request.Context(), service.AnalyzeOption{
 		Subject:     req.Subject,
 		Content:     req.Content,
 		SaveHistory: true,
 	})
 	if err != nil {
+		if c.Request.Context().Err() != nil {
+			// 客户端已断开，写响应无意义。
+			return
+		}
 		// AI 未配置是用户可纠正状态，映射为 4xx 而不是 500。
 		if errors.Is(err, service.ErrNotConfigured) {
 			respondError(c, NewErrHTTP(http.StatusBadRequest, err.Error()))
@@ -69,7 +73,7 @@ func (h *AnalyzeHandler) HandleStream(c *gin.Context) {
 		c.Writer.Flush()
 	}
 
-	result, err := h.analyzer.AnalyzeStream(service.AnalyzeOption{
+	result, err := h.analyzer.AnalyzeStream(c.Request.Context(), service.AnalyzeOption{
 		Subject:     req.Subject,
 		Content:     req.Content,
 		SaveHistory: true,
@@ -79,6 +83,10 @@ func (h *AnalyzeHandler) HandleStream(c *gin.Context) {
 		OnStatus: func(msg string) { send("status", gin.H{"message": msg}) },
 	})
 	if err != nil {
+		if c.Request.Context().Err() != nil {
+			// 客户端中止（连接已断开），无法也无需回写错误事件。
+			return
+		}
 		send("error", gin.H{"error": err.Error()})
 		return
 	}

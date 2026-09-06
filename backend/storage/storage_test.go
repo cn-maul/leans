@@ -24,10 +24,17 @@ func newTestStore(t *testing.T) *Store {
 
 func modelAISettings() model.AISettings {
 	return model.AISettings{
-		Provider: "deepseek",
-		APIKey:   "sk-test",
-		BaseURL:  "https://api.deepseek.com/v1",
-		Model:    "deepseek-chat",
+		ActiveProviderID: "p1",
+		ActiveModel:      "deepseek-chat",
+		Providers: []model.AIProvider{
+			{
+				ID:      "p1",
+				Name:    "DeepSeek",
+				BaseURL: "https://api.deepseek.com/v1",
+				APIKey:  "sk-test",
+				Models:  []string{"deepseek-chat", "deepseek-reasoner"},
+			},
+		},
 	}
 }
 
@@ -60,7 +67,7 @@ func TestSettingsRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSettings: %v", err)
 	}
-	if got.Provider != "" || got.APIKey != "" {
+	if len(got.Providers) != 0 || got.ActiveProviderID != "" {
 		t.Errorf("empty settings expected, got %+v", got)
 	}
 
@@ -72,11 +79,66 @@ func TestSettingsRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSettings after save: %v", err)
 	}
-	if got.Provider != "deepseek" || got.Model != "deepseek-chat" ||
-		got.BaseURL != "https://api.deepseek.com/v1" || got.APIKey != "sk-test" {
-		t.Errorf("settings mismatch: %+v", got)
+	if got.ActiveProviderID != "p1" || got.ActiveModel != "deepseek-chat" || len(got.Providers) != 1 {
+		t.Fatalf("settings mismatch: %+v", got)
+	}
+	p := got.Providers[0]
+	if p.Name != "DeepSeek" || p.BaseURL != "https://api.deepseek.com/v1" ||
+		p.APIKey != "sk-test" || len(p.Models) != 2 {
+		t.Errorf("provider mismatch: %+v", p)
 	}
 }
+
+// TestSettingsLegacyMigration 旧版按字段拆行的设置应迁移为单供应商，
+// 且保存新格式后旧行被清理。
+func TestSettingsLegacyMigration(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewStore(dir)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer s.Close()
+
+	db := openRaw(t, filepath.Join(dir, "leans.db"))
+	for _, kv := range [][2]string{
+		{"provider", "deepseek"},
+		{"api_key", "sk-old"},
+		{"base_url", "https://api.deepseek.com/v1"},
+		{"model", "deepseek-chat"},
+	} {
+		if _, err := db.Exec(`INSERT INTO settings (key, value) VALUES (?, ?)`, kv[0], kv[1]); err != nil {
+			t.Fatalf("insert legacy row: %v", err)
+		}
+	}
+	db.Close()
+
+	got, err := s.GetSettings()
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	if got.ActiveProviderID != "default" || got.ActiveModel != "deepseek-chat" || len(got.Providers) != 1 {
+		t.Fatalf("migrated settings mismatch: %+v", got)
+	}
+	p := got.Providers[0]
+	if p.ID != "default" || p.Name != "deepseek" || p.BaseURL != "https://api.deepseek.com/v1" ||
+		p.APIKey != "sk-old" || len(p.Models) != 1 || p.Models[0] != "deepseek-chat" {
+		t.Errorf("migrated provider mismatch: %+v", p)
+	}
+
+	if err := s.SaveSettings(modelAISettings()); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+	db = openRaw(t, filepath.Join(dir, "leans.db"))
+	defer db.Close()
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM settings WHERE key IN ('provider','api_key','base_url','model')`).Scan(&n); err != nil {
+		t.Fatalf("count legacy rows: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("legacy rows not cleaned, count = %d", n)
+	}
+}
+
 
 func TestHistoryCRUD(t *testing.T) {
 	s := newTestStore(t)

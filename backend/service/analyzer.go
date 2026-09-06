@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"leans/config"
@@ -78,20 +79,18 @@ func (a *Analyzer) fillMeta(opt AnalyzeOption, result *model.AnalyzeResponse, st
 }
 
 // Analyze runs the full pipeline. The returned result is already normalized.
-func (a *Analyzer) Analyze(opt AnalyzeOption) (*model.AnalyzeResponse, error) {
+// ctx 取消时中止 AI 调用（返回 context.Canceled 包装错误）。
+func (a *Analyzer) Analyze(ctx context.Context, opt AnalyzeOption) (*model.AnalyzeResponse, error) {
 	if a.ai == nil {
 		return nil, fmt.Errorf("AI 服务未配置")
-	}
-	if err := a.ai.Validate(); err != nil {
-		return nil, err
 	}
 	if opt.Subject == "" || opt.Content == "" {
 		return nil, fmt.Errorf("题目或科目不能为空")
 	}
 
-	set, err := a.ai.Settings()
+	resolved, err := a.ai.Resolve()
 	if err != nil {
-		return nil, fmt.Errorf("读取AI配置失败: %w", err)
+		return nil, err
 	}
 	start := time.Now()
 	messages, err := a.buildPrompt(opt)
@@ -102,11 +101,14 @@ func (a *Analyzer) Analyze(opt AnalyzeOption) (*model.AnalyzeResponse, error) {
 	var lastErr error
 	var usage *model.Usage
 	for attempt := 0; attempt <= 1; attempt++ {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		if attempt > 0 {
 			// 重试时在消息末尾追加严格 JSON 提醒。
 			messages = appendStrictJSONReminder(messages)
 		}
-		response, u, err := a.ai.ChatCompletion(messages)
+		response, u, err := a.ai.ChatCompletion(ctx, messages)
 		if err != nil {
 			return nil, fmt.Errorf("AI 调用失败: %w", err)
 		}
@@ -115,7 +117,7 @@ func (a *Analyzer) Analyze(opt AnalyzeOption) (*model.AnalyzeResponse, error) {
 		}
 		result, err := ParseAnalysisResponse(response)
 		if err == nil {
-			a.fillMeta(opt, result, start, 0, usage, set.Model)
+			a.fillMeta(opt, result, start, 0, usage, resolved.Model)
 			return result, nil
 		}
 		lastErr = fmt.Errorf("解析 AI 输出失败: %w", err)
@@ -124,25 +126,23 @@ func (a *Analyzer) Analyze(opt AnalyzeOption) (*model.AnalyzeResponse, error) {
 }
 
 // AnalyzeStream 流式分析：内容增量通过 cb.OnDelta 实时回调；最终返回与
-// Analyze 相同的规范化结果并入库。流式输出解析失败时自动降级为一次
-// 非流式重试（delta 已发出，前端以最终 done 结果为准）。
-func (a *Analyzer) AnalyzeStream(opt AnalyzeOption, cb StreamCallbacks) (*model.AnalyzeResponse, error) {
+// Analyze 相同的规范化结果并入库。ctx 取消（如用户中止）时流随之终止，
+// 不会入库。流式输出解析失败时自动降级为一次非流式重试（delta 已发出，
+// 前端以最终 done 结果为准）。
+func (a *Analyzer) AnalyzeStream(ctx context.Context, opt AnalyzeOption, cb StreamCallbacks) (*model.AnalyzeResponse, error) {
 	if a.ai == nil {
 		return nil, fmt.Errorf("AI 服务未配置")
-	}
-	if err := a.ai.Validate(); err != nil {
-		return nil, err
 	}
 	if opt.Subject == "" || opt.Content == "" {
 		return nil, fmt.Errorf("题目或科目不能为空")
 	}
 
-	set, err := a.ai.Settings()
+	resolved, err := a.ai.Resolve()
 	if err != nil {
-		return nil, fmt.Errorf("读取AI配置失败: %w", err)
+		return nil, err
 	}
 	if cb.OnModel != nil {
-		cb.OnModel(set.Model)
+		cb.OnModel(resolved.Model)
 	}
 
 	start := time.Now()
@@ -151,20 +151,23 @@ func (a *Analyzer) AnalyzeStream(opt AnalyzeOption, cb StreamCallbacks) (*model.
 		return nil, err
 	}
 
-	content, usage, firstTokenMS, serr := a.ai.ChatCompletionStream(messages, cb.OnDelta)
+	content, usage, firstTokenMS, serr := a.ai.ChatCompletionStream(ctx, messages, cb.OnDelta)
 	if serr != nil {
 		return nil, fmt.Errorf("AI 调用失败: %w", serr)
 	}
 
 	result, err := ParseAnalysisResponse(content)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		if cb.OnStatus != nil {
 			cb.OnStatus("输出解析失败，正在重试…")
 		}
 		retryMsgs := appendStrictJSONReminder(messages)
 		var response string
 		var u *model.Usage
-		response, u, err = a.ai.ChatCompletion(retryMsgs)
+		response, u, err = a.ai.ChatCompletion(ctx, retryMsgs)
 		if err != nil {
 			return nil, fmt.Errorf("AI 调用失败: %w", err)
 		}
@@ -177,7 +180,7 @@ func (a *Analyzer) AnalyzeStream(opt AnalyzeOption, cb StreamCallbacks) (*model.
 		}
 	}
 
-	a.fillMeta(opt, result, start, firstTokenMS, usage, set.Model)
+	a.fillMeta(opt, result, start, firstTokenMS, usage, resolved.Model)
 	return result, nil
 }
 

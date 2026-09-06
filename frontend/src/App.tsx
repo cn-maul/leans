@@ -33,6 +33,7 @@ function App() {
     stage,
     error: analysisError,
     run,
+    cancel: cancelAnalysis,
     setResult,
     partial,
     liveModel,
@@ -41,7 +42,7 @@ function App() {
   const analysisLoading = stage === 'running'
 
   const { items: history, reload, clear } = useHistory()
-  const { settings, saving, testing, error: settingsError, save, test } = useSettings()
+  const { settings, saving, error: settingsError, save, select, test } = useSettings()
   const { theme, toggle } = useTheme()
 
   const [view, setView] = useState<View>('analyze')
@@ -99,6 +100,18 @@ function App() {
     }
   }
 
+  // 二级下拉切换：供应商切换时模型由后端自动选中该供应商的可用模型。
+  const handleProviderChange = (id: string) => {
+    select(id, '').catch((e) => {
+      setValidationError(e instanceof Error ? e.message : '切换供应商失败')
+    })
+  }
+  const handleModelChange = (model: string) => {
+    select(settings.active_provider_id, model).catch((e) => {
+      setValidationError(e instanceof Error ? e.message : '切换模型失败')
+    })
+  }
+
   // 合并所有标注：highlights + 规则命中的 marks（旧记录的绿色规则标注）。
   const allHighlights = useMemo<Highlight[]>(() => {
     if (!result) return []
@@ -140,9 +153,16 @@ function App() {
                 question={question}
                 onChange={setQuestion}
                 onAnalyze={() => void handleAnalyze()}
+                onCancel={cancelAnalysis}
                 loading={analysisLoading}
                 hasSubject={Boolean(selectedSubject)}
                 error={error}
+                providers={settings.providers}
+                activeProviderId={settings.active_provider_id}
+                activeModel={settings.active_model}
+                onProviderChange={handleProviderChange}
+                onModelChange={handleModelChange}
+                onOpenSettings={() => setSettingsOpen(true)}
               />
               <AnnotatedQuestion
                 question={question}
@@ -191,7 +211,6 @@ function App() {
         open={settingsOpen}
         settings={settings}
         saving={saving}
-        testing={testing}
         error={settingsError}
         onClose={() => setSettingsOpen(false)}
         onSave={(s) => void handleSaveSettings(s)}
