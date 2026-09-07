@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"leans/model"
 
@@ -139,7 +140,6 @@ func TestSettingsLegacyMigration(t *testing.T) {
 	}
 }
 
-
 func TestHistoryCRUD(t *testing.T) {
 	s := newTestStore(t)
 
@@ -218,10 +218,10 @@ func TestStats(t *testing.T) {
 		t.Errorf("empty stats mismatch: %+v", st)
 	}
 
-	if _, err := s.AddHistory(model.HistoryItem{Subject: "s", Question: "q1", Category: "c", Result: "{}", Tokens: 1000, ElapsedMS: 5000, FirstTokenMS: 800}); err != nil {
+	if _, err := s.AddHistory(model.HistoryItem{Subject: "s", Question: "q1", Category: "c", Result: "{}", Model: "m-a", Tokens: 1000, ElapsedMS: 5000, FirstTokenMS: 800}); err != nil {
 		t.Fatalf("AddHistory: %v", err)
 	}
-	if _, err := s.AddHistory(model.HistoryItem{Subject: "s", Question: "q2", Category: "c", Result: "{}", Tokens: 2000, ElapsedMS: 7000, FirstTokenMS: 1600}); err != nil {
+	if _, err := s.AddHistory(model.HistoryItem{Subject: "s", Question: "q2", Category: "c", Result: "{}", Model: "m-b", Tokens: 2000, ElapsedMS: 7000, FirstTokenMS: 1600}); err != nil {
 		t.Fatalf("AddHistory: %v", err)
 	}
 
@@ -243,6 +243,25 @@ func TestStats(t *testing.T) {
 	}
 	if st.TotalElapsedMS != 12000 {
 		t.Errorf("total_elapsed_ms = %d, want 12000", st.TotalElapsedMS)
+	}
+
+	// 按模型聚合：两条记录各一个模型，按题数降序。
+	if len(st.ByModel) != 2 {
+		t.Fatalf("by_model = %d rows, want 2", len(st.ByModel))
+	}
+	for _, m := range st.ByModel {
+		if m.Questions != 1 || m.Tokens == 0 || m.ElapsedMS == 0 {
+			t.Errorf("by_model row mismatch: %+v", m)
+		}
+	}
+
+	// 按日期聚合：两条记录都在今天，题数、token 合计应一致。
+	today := time.Now().Format("2006-01-02")
+	if len(st.ByDay) != 1 || st.ByDay[0].Day != today {
+		t.Fatalf("by_day = %+v, want single row today (%s)", st.ByDay, today)
+	}
+	if st.ByDay[0].Questions != 2 || st.ByDay[0].Tokens != 3000 {
+		t.Errorf("by_day mismatch: %+v", st.ByDay[0])
 	}
 
 	// 清空后统计归零。

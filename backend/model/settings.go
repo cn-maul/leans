@@ -51,11 +51,29 @@ type HistoryItem struct {
 	CreatedAt    string `json:"created_at"`
 }
 
+// ModelStat 按模型聚合的用量统计，用于统计页的模型排名。
+type ModelStat struct {
+	Model           string  `json:"model"`
+	Questions       int64   `json:"questions"`
+	Tokens          int64   `json:"tokens"`
+	ElapsedMS       int64   `json:"elapsed_ms"`
+	AvgFirstTokenMS float64 `json:"avg_first_token_ms"`
+}
+
+// DayStat 按日期聚合的每日用量，用于统计页的趋势图。
+type DayStat struct {
+	Day       string `json:"day"`
+	Questions int64  `json:"questions"`
+	Tokens    int64  `json:"tokens"`
+}
+
 // Stats 汇总历史记录的统计信息，供统计页展示。
 type Stats struct {
-	TotalQuestions  int64   `json:"total_questions"`
-	TotalTokens     int64   `json:"total_tokens"`
-	AvgTokens       float64 `json:"avg_tokens"`
-	AvgFirstTokenMS float64 `json:"avg_first_token_ms"`
-	TotalElapsedMS  int64   `json:"total_elapsed_ms"`
+	TotalQuestions  int64       `json:"total_questions"`
+	TotalTokens     int64       `json:"total_tokens"`
+	AvgTokens       float64     `json:"avg_tokens"`
+	AvgFirstTokenMS float64     `json:"avg_first_token_ms"`
+	TotalElapsedMS  int64       `json:"total_elapsed_ms"`
+	ByModel         []ModelStat `json:"by_model"`
+	ByDay           []DayStat   `json:"by_day"`
 }

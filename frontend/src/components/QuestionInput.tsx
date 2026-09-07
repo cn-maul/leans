@@ -1,4 +1,5 @@
-import { AlertCircle, ChevronDown, CircleStop, Send } from 'lucide-react'
+import { useLayoutEffect, useRef, useState } from 'react'
+import { AlertCircle, ChevronDown, CircleStop, ClipboardPaste, Send } from 'lucide-react'
 import type { AIProvider } from '../types/analysis'
 
 interface Props {
@@ -40,6 +41,34 @@ export default function QuestionInput({
   const disabled = loading || !question.trim() || !hasSubject
   const activeProvider = providers.find((p) => p.id === activeProviderId)
 
+  // 「粘贴」：用剪贴板内容整体替换输入框（清空 + 粘贴），失败时短暂提示。
+  const [pasteMsg, setPasteMsg] = useState('')
+  const pasteTimer = useRef<number | undefined>(undefined)
+
+  const handlePaste = async () => {
+    try {
+      const text = await navigator.clipboard.readText()
+      onChange(text)
+    } catch {
+      setPasteMsg('无法读取剪贴板，请检查浏览器权限')
+      window.clearTimeout(pasteTimer.current)
+      pasteTimer.current = window.setTimeout(() => setPasteMsg(''), 3000)
+    }
+  }
+
+  // 输入框随内容自动伸缩（96–320px），长题目不会挤占下方标注视图。
+  // Chrome 会把 placeholder 计入 scrollHeight，空输入时须临时摘掉再测量。
+  const taRef = useRef<HTMLTextAreaElement>(null)
+  useLayoutEffect(() => {
+    const ta = taRef.current
+    if (!ta) return
+    const prev = ta.placeholder
+    if (!question.trim()) ta.placeholder = ''
+    ta.style.height = '0px'
+    ta.style.height = `${Math.max(96, Math.min(ta.scrollHeight, 320))}px`
+    ta.placeholder = prev
+  }, [question])
+
   return (
     <div
       className={`shrink-0 overflow-hidden rounded-xl border bg-white transition-colors dark:bg-zinc-900 ${
@@ -49,6 +78,8 @@ export default function QuestionInput({
       }`}
     >
       <textarea
+        ref={taRef}
+        style={{ height: 96 }}
         value={question}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {
@@ -57,7 +88,7 @@ export default function QuestionInput({
           }
         }}
         placeholder={'请粘贴带选项的题目，例如：\n\n这段文字意在说明：\nA. 选项一\nB. 选项二\nC. 选项三\nD. 选项四'}
-        className="h-24 w-full resize-none border-0 bg-transparent p-4 text-sm leading-6 text-zinc-800 outline-none placeholder:text-zinc-400 dark:bg-transparent dark:text-zinc-100 dark:placeholder:text-zinc-500"
+        className="min-h-24 w-full resize-none border-0 bg-transparent p-4 text-sm leading-6 text-zinc-800 outline-none placeholder:text-zinc-400 dark:bg-transparent dark:text-zinc-100 dark:placeholder:text-zinc-500"
         spellCheck={false}
       />
       <div className="flex h-11 items-center justify-between gap-3 border-t border-zinc-100 px-4 dark:border-zinc-800">
@@ -124,11 +155,22 @@ export default function QuestionInput({
               <AlertCircle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
               <span className="truncate">{error}</span>
             </span>
+          ) : pasteMsg ? (
+            <span className="text-xs text-rose-500 dark:text-rose-400">{pasteMsg}</span>
           ) : (
             <span className="tnum text-xs text-zinc-400 dark:text-zinc-500">
               {question.trim().length} 字
             </span>
           )}
+          <button
+            onClick={() => void handlePaste()}
+            disabled={loading}
+            title="清空当前内容，粘贴剪贴板"
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 text-[13px] font-medium text-zinc-600 transition-all hover:border-zinc-300 hover:bg-zinc-50 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-zinc-600 dark:hover:bg-zinc-800"
+          >
+            <ClipboardPaste className="h-3.5 w-3.5" aria-hidden="true" />
+            粘贴
+          </button>
           {loading ? (
             <button
               onClick={onCancel}

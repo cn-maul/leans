@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Clock, Coins, Gauge, RefreshCw, Target, Zap } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { BarChart3, Clock, Coins, Cpu, Gauge, RefreshCw, Target, Zap } from 'lucide-react'
 import * as api from '../api/client'
-import type { HistoryItem, Stats } from '../types/analysis'
+import type { DayStat, HistoryItem, Stats } from '../types/analysis'
 
 // 统计视图：累计题数、总 token、平均 token/题、累计用时 + 最近分析列表。
 export default function StatsPage() {
@@ -27,6 +27,22 @@ export default function StatsPage() {
   useEffect(() => {
     void load()
   }, [load])
+
+  // 近 14 天每日题量（无记录的日期补零对齐）。
+  const days = useMemo<DayStat[]>(() => {
+    const by: Record<string, DayStat> = {}
+    for (const d of stats?.by_day ?? []) by[d.day] = d
+    const out: DayStat[] = []
+    const now = new Date()
+    for (let i = 13; i >= 0; i--) {
+      const dt = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i)
+      const key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`
+      out.push(by[key] ?? { day: key, questions: 0, tokens: 0 })
+    }
+    return out
+  }, [stats])
+  const maxDaily = Math.max(1, ...days.map((d) => d.questions))
+  const maxModelTokens = Math.max(1, ...(stats?.by_model ?? []).map((m) => m.tokens))
 
   return (
     <div className="mx-auto h-full w-full max-w-4xl animate-fade-up overflow-y-auto">
@@ -92,6 +108,113 @@ export default function StatsPage() {
               value={formatDuration(stats.total_elapsed_ms)}
               delay={240}
             />
+          </div>
+
+          {/* 每日趋势 */}
+          <div className="mt-6">
+            <h3 className="mb-2 flex items-center gap-1.5 text-xs font-medium text-zinc-500 dark:text-zinc-400">
+              <BarChart3 className="h-3.5 w-3.5" aria-hidden="true" />
+              每日趋势（近 14 天）
+            </h3>
+            <div className="rounded-xl border border-zinc-200 bg-white px-4 pt-4 pb-2 dark:border-zinc-800 dark:bg-zinc-900">
+              <div className="flex h-36 items-end gap-1">
+                {days.map((d) => (
+                  <div
+                    key={d.day}
+                    className="flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-1.5"
+                    title={`${d.day}：${d.questions} 题 · ${d.tokens.toLocaleString()} tokens`}
+                  >
+                    <div className="flex w-full flex-1 items-end">
+                      <div
+                        className={`w-full rounded-t-md ${
+                          d.questions > 0
+                            ? 'bg-zinc-900 dark:bg-zinc-100'
+                            : 'bg-zinc-200/70 dark:bg-zinc-800'
+                        }`}
+                        style={{
+                          height:
+                            d.questions > 0
+                              ? `${Math.max(6, Math.round((d.questions / maxDaily) * 100))}%`
+                              : '3px',
+                        }}
+                      />
+                    </div>
+                    <span className="shrink-0 text-[9px] tabular-nums text-zinc-400 dark:text-zinc-500">
+                      {d.day.slice(5)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* 按模型用量 */}
+          <div className="mt-6">
+            <h3 className="mb-2 flex items-center gap-1.5 text-xs font-medium text-zinc-500 dark:text-zinc-400">
+              <Cpu className="h-3.5 w-3.5" aria-hidden="true" />
+              按模型用量
+            </h3>
+            {stats.by_model.length === 0 ? (
+              <p className="rounded-xl border border-dashed border-zinc-200 px-4 py-8 text-center text-xs text-zinc-400 dark:border-zinc-800 dark:text-zinc-500">
+                暂无模型用量数据
+              </p>
+            ) : (
+              <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+                <div className="flex items-center gap-3 border-b border-zinc-100 px-4 py-1.5 dark:border-zinc-800">
+                  <span className="w-5 shrink-0" />
+                  <span className="flex-1 text-[10px] text-zinc-400 dark:text-zinc-500">模型</span>
+                  <span className="tnum w-12 shrink-0 text-right text-[10px] text-zinc-400 dark:text-zinc-500">
+                    题数
+                  </span>
+                  <span className="tnum hidden w-24 shrink-0 text-right text-[10px] text-zinc-400 sm:block dark:text-zinc-500">
+                    Tokens
+                  </span>
+                  <span className="tnum hidden w-16 shrink-0 text-right text-[10px] text-zinc-400 lg:block dark:text-zinc-500">
+                    平均首字
+                  </span>
+                  <span className="tnum hidden w-16 shrink-0 text-right text-[10px] text-zinc-400 lg:block dark:text-zinc-500">
+                    用时
+                  </span>
+                </div>
+                <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                  {stats.by_model.map((m, i) => (
+                    <div key={m.model || i} className="flex items-center gap-3 px-4 py-2.5">
+                      <span className="tnum w-5 shrink-0 text-center text-[11px] text-zinc-400 dark:text-zinc-500">
+                        {i + 1}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p
+                          className="truncate text-[13px] text-zinc-800 dark:text-zinc-200"
+                          title={m.model}
+                        >
+                          {m.model || '默认模型'}
+                        </p>
+                        <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
+                          <div
+                            className="h-full rounded-full bg-zinc-900 dark:bg-zinc-100"
+                            style={{
+                              width: `${Math.max(2, Math.round((m.tokens / maxModelTokens) * 100))}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+                      <span className="tnum w-12 shrink-0 text-right text-[11px] text-zinc-400 dark:text-zinc-500">
+                        {m.questions} 题
+                      </span>
+                      <span className="tnum hidden w-24 shrink-0 text-right text-xs text-zinc-600 sm:block dark:text-zinc-300">
+                        {m.tokens.toLocaleString()} tokens
+                      </span>
+                      <span className="tnum hidden w-16 shrink-0 text-right text-[11px] text-zinc-400 lg:block dark:text-zinc-500">
+                        {m.avg_first_token_ms > 0 ? `${(m.avg_first_token_ms / 1000).toFixed(1)}s` : '—'}
+                      </span>
+                      <span className="tnum hidden w-16 shrink-0 text-right text-[11px] text-zinc-400 lg:block dark:text-zinc-500">
+                        {formatDuration(m.elapsed_ms)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="mt-6">

@@ -34,7 +34,7 @@ export default function AnnotatedQuestion({ question, highlights, active }: Prop
   ]
 
   return (
-    <div className="flex min-h-0 flex-1 animate-fade-up flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+    <div className="flex max-h-full min-h-0 animate-fade-up flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
       <div className="flex h-10 shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-zinc-100 px-4 dark:border-zinc-800">
         <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-500 dark:text-zinc-400">
           <Highlighter className="h-3.5 w-3.5 text-zinc-700 dark:text-zinc-300" aria-hidden="true" />

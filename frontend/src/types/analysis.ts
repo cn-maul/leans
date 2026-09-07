@@ -34,12 +34,28 @@ export interface HistoryItem {
 }
 
 // 统计页数据，对应 GET /api/stats。
+export interface ModelStat {
+  model: string
+  questions: number
+  tokens: number
+  elapsed_ms: number
+  avg_first_token_ms: number
+}
+
+export interface DayStat {
+  day: string
+  questions: number
+  tokens: number
+}
+
 export interface Stats {
   total_questions: number
   total_tokens: number
   avg_tokens: number
   avg_first_token_ms: number
   total_elapsed_ms: number
+  by_model: ModelStat[]
+  by_day: DayStat[]
 }
 
 export type HighlightColor = 'green' | 'red' | 'blue' | 'yellow' | 'ink'

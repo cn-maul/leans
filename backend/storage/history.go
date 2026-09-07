@@ -68,7 +68,8 @@ func (s *Store) ClearHistory() error {
 }
 
 // GetStats aggregates history records into the summary shown on the stats page.
-// 平均首字只统计有首字耗时记录（流式请求）的行。
+// 平均首字只统计有首字耗时记录（流式请求）的行；ByModel/ByDay 分别按
+// 模型、按日期聚合，均按题数降序/日期升序返回。
 func (s *Store) GetStats() (*model.Stats, error) {
 	var st model.Stats
 	err := s.db.QueryRow(
@@ -80,6 +81,45 @@ func (s *Store) GetStats() (*model.Stats, error) {
 		 FROM history`,
 	).Scan(&st.TotalQuestions, &st.TotalTokens, &st.AvgTokens, &st.AvgFirstTokenMS, &st.TotalElapsedMS)
 	if err != nil {
+		return nil, err
+	}
+
+	rows, err := s.db.Query(
+		`SELECT model, COUNT(*), SUM(tokens), SUM(elapsed_ms),
+			COALESCE(AVG(CASE WHEN first_token_ms > 0 THEN first_token_ms END), 0)
+		 FROM history GROUP BY model ORDER BY COUNT(*) DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	st.ByModel = []model.ModelStat{}
+	for rows.Next() {
+		var m model.ModelStat
+		if err := rows.Scan(&m.Model, &m.Questions, &m.Tokens, &m.ElapsedMS, &m.AvgFirstTokenMS); err != nil {
+			return nil, err
+		}
+		st.ByModel = append(st.ByModel, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	rows, err = s.db.Query(
+		`SELECT substr(created_at, 1, 10) AS day, COUNT(*), SUM(tokens)
+		 FROM history GROUP BY day ORDER BY day`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	st.ByDay = []model.DayStat{}
+	for rows.Next() {
+		var d model.DayStat
+		if err := rows.Scan(&d.Day, &d.Questions, &d.Tokens); err != nil {
+			return nil, err
+		}
+		st.ByDay = append(st.ByDay, d)
+	}
+	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	return &st, nil
