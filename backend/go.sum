@@ -8,6 +8,8 @@ github.com/cloudwego/base64x v0.1.6 h1:t11wG9AECkCDk5fMSoxmufanudBtJ+/HemLstXDLI
 github.com/cloudwego/base64x v0.1.6/go.mod h1:OFcloc187FXDaYHvrNIjxSe8ncn0OOM8gEHfghB2IPU=
 github.com/cn-maul/rosetta v0.2.0 h1:RTYewMI0QDZolJp6JVb9R94X4NYYTnE/N8U7hioc6qY=
 github.com/cn-maul/rosetta v0.2.0/go.mod h1:Lh7CUc8/aj/XsFQClPn5D2H5Py1lRI4XAJEtRhh/hbM=
+github.com/cn-maul/rosetta v0.3.0 h1:n6jfVAoL+fEJWBO/7XZDEzg0D+51+x49nwdmfSjYTzE=
+github.com/cn-maul/rosetta v0.3.0/go.mod h1:L/Br0RylBF84fNmudwD+hyMZMpjYmVWsFxu9bVj+5BY=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
