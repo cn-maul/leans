@@ -56,9 +56,9 @@ export function ResultPills({ result, loading, partial }: PanelProps) {
     const techniqueText = partial.rules.map((r) => r.name).join('、')
     return (
       <div className="flex shrink-0 flex-wrap items-center gap-2">
-        <Pill label="题型" value={typeText || '…'} delay={0} live />
-        <Pill label="技巧" value={techniqueText || '…'} delay={60} live />
-        <Pill label="答案" value={partial.answer || '…'} solid delay={120} live />
+        <Pill label="题型" value={typeText || '…'} live />
+        <Pill label="技巧" value={techniqueText || '…'} live />
+        <Pill label="答案" value={partial.answer || '…'} solid live />
       </div>
     )
   }
@@ -77,22 +77,19 @@ export function ResultPills({ result, loading, partial }: PanelProps) {
 
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-2">
-      <Pill label="题型" value={typeText || '—'} title={typeText} delay={0} />
+      <Pill label="题型" value={typeText || '—'} title={typeText} />
       <Pill
         label="技巧"
         value={techniqueValue}
         title={rules.map((r) => `${r.name}（${r.section}）`).join('、')}
-        delay={60}
       />
-      <Pill label="答案" value={answer || '—'} solid delay={120} />
+      <Pill label="答案" value={answer || '—'} solid />
     </div>
   )
 }
 
 function PillSkeleton({ className = '' }: { className?: string }) {
-  return (
-    <div className={`h-9 animate-pulse rounded-full bg-zinc-100 dark:bg-zinc-800 ${className}`} />
-  )
+  return <div className={`h-9 animate-pulse rounded-pill bg-fill ${className}`} />
 }
 
 function Pill({
@@ -100,30 +97,27 @@ function Pill({
   value,
   title,
   solid,
-  delay,
   live,
 }: {
   label: string
   value: string
   title?: string
   solid?: boolean
-  delay: number
   live?: boolean
 }) {
   const isAnswer = label === '答案'
   return (
     <div
-      className={`inline-flex h-9 min-w-0 max-w-full animate-fade-up items-center gap-2 rounded-full border pl-3.5 pr-4 transition-colors ${
-        solid
-          ? 'border-zinc-900 bg-zinc-900 text-white dark:border-zinc-100 dark:bg-zinc-100 dark:text-zinc-900'
-          : 'border-zinc-200 bg-white text-zinc-900 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100'
+      className={`inline-flex h-9 min-w-0 max-w-full items-center gap-2 rounded-pill border pl-3.5 pr-4 transition-colors duration-200 ease-quart ${
+        solid ? 'border-ink bg-ink text-surface' : 'border-hairline bg-surface text-ink'
       }`}
-      style={{ animationDelay: `${delay}ms` }}
       title={title || value}
     >
       <span
         className={`shrink-0 text-[11px] tracking-wide ${
-          solid ? 'text-white/60 dark:text-zinc-900/60' : 'text-zinc-400 dark:text-zinc-500'
+          // 用 opacity 而不是 /60 修饰符：透明度修饰符会把颜色编译成字面值，
+          // 拿不到 .dark 下的变量覆盖。
+          solid ? 'text-surface opacity-60' : 'text-quiet'
         }`}
       >
         {label}
@@ -139,7 +133,7 @@ function Pill({
   )
 }
 
-// ---- 通用卡片框 ----
+// ---- 通用面板 ----
 
 function Card({
   title,
@@ -156,10 +150,10 @@ function Card({
 }) {
   return (
     <section
-      className={`flex min-h-0 animate-fade-up flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900 ${className}`}
+      className={`flex min-h-0 flex-col overflow-hidden rounded-card bg-surface shadow-card ${className}`}
     >
-      <header className="flex h-10 shrink-0 items-center justify-between gap-3 border-b border-zinc-100 px-4 dark:border-zinc-800">
-        <h3 className="text-xs font-medium text-zinc-500 dark:text-zinc-400">{title}</h3>
+      <header className="flex h-10 shrink-0 items-center justify-between gap-3 border-b border-hairline px-4">
+        <h3 className="text-xs font-medium text-muted">{title}</h3>
         {aside}
       </header>
       <div ref={bodyRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-3.5">
@@ -171,11 +165,11 @@ function Card({
 
 function SkeletonLines({ count = 3 }: { count?: number }) {
   return (
-    <div className="animate-fade-in space-y-2.5" aria-label="加载中">
+    <div className="space-y-2.5" aria-label="加载中">
       {Array.from({ length: count }, (_, i) => (
         <div
           key={i}
-          className="h-3 animate-pulse rounded bg-zinc-100 dark:bg-zinc-800"
+          className="h-3 animate-pulse rounded-chip bg-fill"
           style={{ width: i === count - 1 ? '55%' : `${88 - i * 12}%` }}
         />
       ))}
@@ -186,8 +180,8 @@ function SkeletonLines({ count = 3 }: { count?: number }) {
 function EmptyHint({ text, hint }: { text: string; hint?: string }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-1 py-4 text-center">
-      <p className="text-xs text-zinc-500 dark:text-zinc-400">{text}</p>
-      {hint && <p className="text-[11px] text-zinc-400 dark:text-zinc-500">{hint}</p>}
+      <p className="text-xs text-muted">{text}</p>
+      {hint && <p className="text-[11px] text-quiet">{hint}</p>}
     </div>
   )
 }
@@ -221,20 +215,18 @@ function RulesBody({
   return (
     <div className="space-y-4">
       {rules.map((r, i) => (
-        <div key={i} className="animate-fade-up" style={{ animationDelay: `${i * 60}ms` }}>
+        <div key={i}>
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-            <h4 className="text-[13px] font-semibold text-zinc-900 dark:text-zinc-100">{r.name}</h4>
-            {r.section && (
-              <span className="text-[11px] text-zinc-400 dark:text-zinc-500">{r.section}</span>
-            )}
+            <h4 className="text-[13px] font-semibold text-ink">{r.name}</h4>
+            {r.section && <span className="text-[11px] text-quiet">{r.section}</span>}
           </div>
           {r.usage ? (
-            <p className="mt-1 text-[13px] leading-6 text-zinc-600 dark:text-zinc-300">
+            <p className="mt-1 text-[13px] leading-6 text-body">
               {r.usage}
               {streaming && i === rules.length - 1 && <Caret />}
             </p>
           ) : (
-            <p className="mt-1 text-[13px] text-zinc-400 dark:text-zinc-500">
+            <p className="mt-1 text-[13px] text-quiet">
               正在生成用法…
               {streaming && i === rules.length - 1 && <Caret />}
             </p>
@@ -255,21 +247,15 @@ function TechniqueBody({ result }: { result: AnalysisResult }) {
       {rules.map((r, i) => {
         const application = r.application || r.usage || ''
         return (
-          <div key={i} className="animate-fade-up" style={{ animationDelay: `${i * 60}ms` }}>
+          <div key={i}>
             <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-              <h4 className="text-[13px] font-semibold text-zinc-900 dark:text-zinc-100">
-                {r.name}
-              </h4>
-              {r.section && (
-                <span className="text-[11px] text-zinc-400 dark:text-zinc-500">{r.section}</span>
-              )}
+              <h4 className="text-[13px] font-semibold text-ink">{r.name}</h4>
+              {r.section && <span className="text-[11px] text-quiet">{r.section}</span>}
             </div>
             {application ? (
-              <p className="mt-1 text-[13px] leading-6 text-zinc-600 dark:text-zinc-300">
-                {application}
-              </p>
+              <p className="mt-1 text-[13px] leading-6 text-body">{application}</p>
             ) : (
-              <p className="mt-1 text-[13px] text-zinc-400 dark:text-zinc-500">暂无用法说明</p>
+              <p className="mt-1 text-[13px] text-quiet">暂无用法说明</p>
             )}
           </div>
         )
@@ -301,7 +287,7 @@ export function AnnotationPanel({
 
   // 完成后的 meta 信息条：模型 · 首字 · 总用时 · tokens。
   const metaAside = hasMeta ? (
-    <div className="tnum flex shrink-0 items-center gap-2 overflow-hidden text-[11px] text-zinc-400 dark:text-zinc-500">
+    <div className="tnum flex shrink-0 items-center gap-2 overflow-hidden text-[11px] text-quiet">
       {meta.model && (
         <span className="truncate" title={`模型 ${meta.model}`}>
           {meta.model}
@@ -328,7 +314,7 @@ export function AnnotationPanel({
 
   // 流式中的 header：模型 · 首字 · 实时用时。
   const liveAside = loading ? (
-    <div className="tnum flex shrink-0 items-center gap-2 overflow-hidden text-[11px] text-zinc-400 dark:text-zinc-500">
+    <div className="tnum flex shrink-0 items-center gap-2 overflow-hidden text-[11px] text-quiet">
       {model && (
         <span className="truncate" title={`模型 ${model}`}>
           {model}
@@ -354,7 +340,7 @@ export function AnnotationPanel({
     >
       {loading ? (
         streamingText ? (
-          <p className="animate-fade-in text-sm leading-7 whitespace-pre-wrap text-zinc-700 dark:text-zinc-300">
+          <p className="text-[15px] leading-7 whitespace-pre-wrap text-body">
             {streamingText}
             <Caret />
           </p>
@@ -364,11 +350,9 @@ export function AnnotationPanel({
       ) : !result ? (
         <EmptyHint text="等待分析结果" hint="完成分析后在这里查看解题思路" />
       ) : result.annotation ? (
-        <p className="animate-fade-in text-sm leading-7 whitespace-pre-wrap text-zinc-700 dark:text-zinc-300">
-          {result.annotation}
-        </p>
+        <p className="text-[15px] leading-7 whitespace-pre-wrap text-body">{result.annotation}</p>
       ) : (
-        <p className="text-sm text-zinc-400 dark:text-zinc-500">暂无注释</p>
+        <p className="text-sm text-quiet">暂无注释</p>
       )}
     </Card>
   )
@@ -377,10 +361,7 @@ export function AnnotationPanel({
 // 打字机光标。
 function Caret() {
   return (
-    <span
-      className="ml-0.5 inline-block h-4 w-[2px] translate-y-[3px] animate-pulse-dot bg-zinc-800 dark:bg-zinc-200"
-      aria-hidden="true"
-    />
+    <span className="ml-0.5 inline-block h-4 w-[2px] translate-y-[3px] animate-pulse-dot bg-ink" aria-hidden="true" />
   )
 }
 
@@ -400,20 +381,18 @@ function AnalyzingState() {
 
   return (
     <div className="flex h-full flex-col items-center justify-center gap-3">
-      <p className="tnum text-3xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-        {elapsed}s
-      </p>
-      <p className="text-xs text-zinc-500 dark:text-zinc-400">{STAGES[stage]}</p>
+      <p className="tnum text-3xl font-semibold tracking-[-0.02em] text-ink">{elapsed}s</p>
+      <p className="text-xs text-muted">{STAGES[stage]}</p>
       <div className="flex gap-1.5">
         {STAGES.map((_, i) => (
           <span
             key={i}
-            className={`h-1.5 w-1.5 rounded-full transition-colors duration-300 ${
+            className={`h-1.5 w-1.5 rounded-full transition-colors duration-300 ease-quart ${
               i === stage
-                ? 'animate-pulse-dot bg-zinc-900 dark:bg-zinc-100'
+                ? 'animate-pulse-dot bg-ink'
                 : i < stage
-                  ? 'bg-zinc-400 dark:bg-zinc-500'
-                  : 'bg-zinc-200 dark:bg-zinc-700'
+                  ? 'bg-quiet'
+                  : 'bg-track'
             }`}
           />
         ))}

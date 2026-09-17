@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { X } from 'lucide-react'
 
 interface Props {
@@ -10,27 +10,36 @@ interface Props {
 }
 
 export default function Drawer({ open, title, onClose, children, footer }: Props) {
+  // 抽屉始终挂载：卸载会把退出动画一并带走，也没有可中断的当前值可用。
+  // 打开状态交给 data-open，由 CSS transition 负责进出场（同一路径、可随时反向）。
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open, onClose])
+
   return (
     <div
-      className={`fixed inset-0 z-50 transition-opacity duration-200 ${
-        open ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'
-      }`}
+      className={`fixed inset-0 z-50 ${open ? '' : 'pointer-events-none'}`}
       aria-hidden={!open}
+      inert={!open}
     >
-      <div className="absolute inset-0 bg-zinc-950/40 backdrop-blur-[2px]" onClick={onClose} />
+      <div className="scrim absolute inset-0" data-open={open} onClick={onClose} />
       <div
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className={`absolute top-0 right-0 flex h-full w-full max-w-md flex-col border-l border-zinc-200 bg-white shadow-2xl transition-transform duration-300 dark:border-zinc-800 dark:bg-zinc-900 ${
-          open ? 'translate-x-0' : 'translate-x-full'
-        }`}
+        data-open={open}
+        className="drawer glass-sheet absolute top-0 right-0 flex h-full w-full max-w-md flex-col border-l border-hairline shadow-overlay"
       >
-        <div className="flex h-14 shrink-0 items-center justify-between border-b border-zinc-100 px-5 dark:border-zinc-800">
-          <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{title}</h3>
+        <div className="flex h-14 shrink-0 items-center justify-between border-b border-hairline px-5">
+          <h3 className="text-[15px] font-semibold tracking-[-0.01em] text-ink">{title}</h3>
           <button
             onClick={onClose}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:text-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-pill text-quiet transition-[background-color,color,transform] duration-150 ease-quart hover:bg-fill hover:text-ink active:scale-[0.94] max-sm:h-11 max-sm:w-11"
             aria-label="关闭"
           >
             <X className="h-4 w-4" aria-hidden="true" />
@@ -38,9 +47,7 @@ export default function Drawer({ open, title, onClose, children, footer }: Props
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
         {footer && (
-          <div className="shrink-0 border-t border-zinc-100 px-5 py-3 dark:border-zinc-800">
-            {footer}
-          </div>
+          <div className="shrink-0 border-t border-hairline px-5 py-3">{footer}</div>
         )}
       </div>
     </div>

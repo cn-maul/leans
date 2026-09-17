@@ -12,7 +12,6 @@
 import { useMemo, type ReactNode } from 'react'
 import { Highlighter } from 'lucide-react'
 import type { Highlight } from '../types/analysis'
-import { MODULE_COLOR, LEGACY_COLOR } from '../types/analysis'
 
 interface Props {
   question: string
@@ -34,25 +33,25 @@ export default function AnnotatedQuestion({ question, highlights, active }: Prop
   ]
 
   return (
-    <div className="flex max-h-full min-h-0 animate-fade-up flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
-      <div className="flex h-10 shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-zinc-100 px-4 dark:border-zinc-800">
-        <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-500 dark:text-zinc-400">
-          <Highlighter className="h-3.5 w-3.5 text-zinc-700 dark:text-zinc-300" aria-hidden="true" />
+    <div className="flex max-h-full min-h-0 flex-col overflow-hidden rounded-card bg-surface shadow-card">
+      <div className="flex h-10 shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline px-4">
+        <span className="inline-flex items-center gap-1.5 text-xs font-medium text-muted">
+          <Highlighter className="h-3.5 w-3.5 text-body" aria-hidden="true" />
           标注视图
         </span>
         {legend.map(([m, label]) => (
-          <Legend key={m} color={MODULE_COLOR[m]} label={label} />
+          <Legend key={m} module={m} label={label} />
         ))}
       </div>
 
       {active ? (
-        <div className="min-h-0 flex-1 divide-y divide-zinc-100 overflow-y-auto dark:divide-zinc-800">
-          {blocks.map((b, i) => (
-            <section key={b.key} className="animate-fade-up px-5 py-4" style={{ animationDelay: `${i * 40}ms` }}>
-              <div className="mb-2 inline-flex items-center rounded-md bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+        <div className="min-h-0 flex-1 divide-y divide-hairline overflow-y-auto">
+          {blocks.map((b) => (
+            <section key={b.key} className="px-5 py-4">
+              <div className="mb-2 inline-flex items-center rounded-chip bg-fill px-2 py-0.5 text-[11px] font-medium text-muted">
                 {b.label}
               </div>
-              <p className="text-[15px] leading-7 whitespace-pre-wrap text-zinc-800 dark:text-zinc-200">
+              <p className="text-[15px] leading-7 whitespace-pre-wrap text-body">
                 {annotate(b.text, byLoc[b.key] || [])}
               </p>
             </section>
@@ -60,13 +59,11 @@ export default function AnnotatedQuestion({ question, highlights, active }: Prop
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1.5 p-8 text-center">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-dashed border-zinc-300 text-zinc-300 dark:border-zinc-700 dark:text-zinc-600">
+          <div className="flex h-11 w-11 items-center justify-center rounded-thumb border border-dashed border-hint text-ghost">
             <Highlighter className="h-5 w-5" aria-hidden="true" />
           </div>
-          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">等待分析结果</p>
-          <p className="text-xs text-zinc-400 dark:text-zinc-500">
-            分析完成后，题干与选项将在这里分区标注
-          </p>
+          <p className="mt-1 text-sm text-muted">等待分析结果</p>
+          <p className="text-xs text-quiet">分析完成后，题干与选项将在这里分区标注</p>
         </div>
       )}
     </div>
@@ -127,7 +124,7 @@ function groupByLocation(hs: Highlight[]): Record<string, Highlight[]> {
 interface MarkRange {
   start: number
   end: number
-  color: string
+  cls: string
   tip: string
 }
 
@@ -221,7 +218,7 @@ function annotate(text: string, hs: Highlight[]): ReactNode[] {
   for (const r of merged) {
     if (r.start > pos) out.push(text.slice(pos, r.start))
     out.push(
-      <mark key={r.start} className={markClass(r.color)} title={r.tip}>
+      <mark key={r.start} className={r.cls} title={r.tip}>
         {text.slice(r.start, r.end + 1)}
       </mark>,
     )
@@ -233,42 +230,42 @@ function annotate(text: string, hs: Highlight[]): ReactNode[] {
 
 function pushRange(ranges: MarkRange[], start: number, end: number, h: Highlight) {
   if (start < 0 || end < start) return
-  // 颜色以 module 为准（与右侧模块一致），旧数据的 color 兜底（紫 → 墨色）。
-  const color = MODULE_COLOR[h.module || ''] || LEGACY_COLOR[h.color || ''] || h.color || 'blue'
-  ranges.push({ start, end, color, tip: h.type + (h.explanation ? '：' + h.explanation : '') })
+  // 以 module 为准（与右侧模块同色），旧数据按 color 兜底（紫 → 墨色）。
+  const cls = MODULE_MARK[h.module || ''] || COLOR_MARK[h.color || ''] || MODULE_MARK.category
+  ranges.push({ start, end, cls, tip: h.type + (h.explanation ? '：' + h.explanation : '') })
 }
 
-const MARK_CLASS: Record<string, string> = {
-  green:
-    'rounded-[4px] bg-emerald-100 px-0.5 text-emerald-900 dark:bg-emerald-400/15 dark:text-emerald-300',
-  red: 'rounded-[4px] bg-rose-100 px-0.5 text-rose-900 dark:bg-rose-400/15 dark:text-rose-300',
-  blue: 'rounded-[4px] bg-sky-100 px-0.5 text-sky-900 dark:bg-sky-400/15 dark:text-sky-300',
-  yellow:
-    'rounded-[4px] bg-amber-100 px-0.5 text-amber-900 dark:bg-amber-400/15 dark:text-amber-300',
-  ink: 'rounded-[4px] bg-zinc-900 px-0.5 text-white dark:bg-zinc-100 dark:text-zinc-900',
-  // 旧数据兼容
-  purple: 'rounded-[4px] bg-zinc-900 px-0.5 text-white dark:bg-zinc-100 dark:text-zinc-900',
+// module → 标记类。色值定义在 index.css，浅/暗两套各一份。
+const MODULE_MARK: Record<string, string> = {
+  category: 'mark mark-category',
+  rule: 'mark mark-rule',
+  annotation: 'mark mark-answer',
+  error: 'mark mark-error',
+  info: 'mark mark-info',
 }
 
-const DOT_CLASS: Record<string, string> = {
-  green: 'bg-emerald-500',
-  red: 'bg-rose-500',
-  blue: 'bg-sky-500',
-  yellow: 'bg-amber-500',
-  ink: 'bg-zinc-900 dark:bg-zinc-100',
-  purple: 'bg-zinc-900 dark:bg-zinc-100',
+// 旧数据只有 color 字段时的兜底。
+const COLOR_MARK: Record<string, string> = {
+  blue: 'mark mark-category',
+  green: 'mark mark-rule',
+  ink: 'mark mark-answer',
+  purple: 'mark mark-answer',
+  red: 'mark mark-error',
+  yellow: 'mark mark-info',
 }
 
-function markClass(color: string): string {
-  return MARK_CLASS[color] || MARK_CLASS.blue
+const MODULE_DOT: Record<string, string> = {
+  category: 'dot-category',
+  rule: 'dot-rule',
+  annotation: 'dot-answer',
+  error: 'dot-error',
+  info: 'dot-info',
 }
 
-function Legend({ color, label }: { color: string; label: string }) {
+function Legend({ module, label }: { module: string; label: string }) {
   return (
-    <span className="inline-flex items-center gap-1 text-[11px] text-zinc-400 dark:text-zinc-500">
-      <span
-        className={`inline-block h-2 w-2 rounded-full ${DOT_CLASS[color] || 'bg-zinc-400'}`}
-      />
+    <span className="inline-flex items-center gap-1 text-[11px] text-quiet">
+      <span className={`inline-block h-2 w-2 rounded-full ${MODULE_DOT[module] || 'dot-info'}`} />
       {label}
     </span>
   )

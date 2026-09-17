@@ -25,25 +25,22 @@ export default function TopBar({
   running,
 }: Props) {
   return (
-    <header className="relative shrink-0 border-b border-zinc-200 bg-white/85 backdrop-blur-xl dark:border-zinc-800 dark:bg-zinc-950/85">
+    <header className="glass-nav relative shrink-0 border-b border-hairline">
       <div className="mx-auto flex h-14 w-full max-w-[1680px] items-center gap-3 px-5">
         <div className="flex min-w-0 items-center gap-2.5">
-          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-zinc-900 text-[13px] font-bold text-white dark:bg-zinc-100 dark:text-zinc-900">
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-chip bg-ink text-[13px] font-bold text-surface">
             析
           </div>
-          <h1 className="truncate text-[15px] font-semibold tracking-tight text-zinc-900 dark:text-white">
+          <h1 className="truncate text-[15px] font-semibold tracking-[-0.01em] text-ink">
             公考题目分析
           </h1>
-          <span
-            className="hidden items-center gap-1 rounded-full border border-zinc-200 px-2.5 py-0.5 text-[11px] text-zinc-500 md:inline-flex dark:border-zinc-800 dark:text-zinc-400"
-            title="当前使用的讲义"
-          >
+          <span className="hidden items-center rounded-pill bg-fill px-2.5 py-1 text-[11px] text-muted md:inline-flex">
             {lectureName}
           </span>
         </div>
 
-        <div className="ml-auto flex items-center gap-1.5">
-          <nav className="flex items-center rounded-lg bg-zinc-100 p-0.5 dark:bg-zinc-800/80">
+        <div className="ml-auto flex items-center gap-1">
+          <nav className="flex items-center gap-[3px] rounded-pill bg-fill p-[3px]">
             <ViewTab
               active={view === 'analyze'}
               onClick={() => onViewChange('analyze')}
@@ -58,7 +55,7 @@ export default function TopBar({
             />
           </nav>
 
-          <span className="mx-1 h-5 w-px bg-zinc-200 dark:bg-zinc-800" aria-hidden="true" />
+          <span className="mx-1.5 h-5 w-px bg-hairline" aria-hidden="true" />
 
           <IconButton onClick={onOpenHistory} label="历史">
             <History className="h-4 w-4" aria-hidden="true" />
@@ -82,13 +79,14 @@ export default function TopBar({
       {/* 分析进行中：顶栏底部的不确定进度条 */}
       {running && (
         <div className="absolute inset-x-0 bottom-0 overflow-hidden" aria-hidden="true">
-          <div className="h-0.5 w-1/4 rounded-full bg-zinc-900 animate-progress-slide dark:bg-zinc-100" />
+          <div className="h-0.5 w-1/4 animate-progress-slide rounded-pill bg-ink" />
         </div>
       )}
     </header>
   )
 }
 
+// 分段胶囊：灰轨道 + 单个滑动药丸。选中态用白药丸（轻量切换语汇）。
 function ViewTab({
   active,
   onClick,
@@ -103,10 +101,10 @@ function ViewTab({
   return (
     <button
       onClick={onClick}
-      className={`inline-flex h-7 items-center gap-1.5 rounded-md px-3 text-[13px] font-medium transition-all ${
+      className={`inline-flex h-7 items-center gap-1.5 rounded-pill px-3 text-[13px] transition-all duration-[250ms] ease-quart active:scale-[0.97] ${
         active
-          ? 'bg-white text-zinc-900 shadow-sm dark:bg-zinc-600 dark:text-white'
-          : 'text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200'
+          ? 'bg-surface font-semibold text-ink shadow-[0_1px_3px_rgb(0_0_0/0.12)]'
+          : 'font-medium text-muted hover:text-ink'
       }`}
       aria-pressed={active}
     >
@@ -130,7 +128,7 @@ function IconButton({
       onClick={onClick}
       title={label}
       aria-label={label}
-      className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+      className="inline-flex h-9 w-9 items-center justify-center rounded-pill text-muted transition-[background-color,color,transform] duration-150 ease-quart hover:bg-fill hover:text-ink active:scale-[0.94] max-sm:h-11 max-sm:w-11"
     >
       {children}
     </button>

@@ -35,7 +35,10 @@ export function maskKey(key: string): string {
 }
 
 const inputCls =
-  'w-full rounded-lg border border-zinc-200 bg-white px-3 py-2.5 text-sm text-zinc-800 transition-colors placeholder:text-zinc-400 focus:border-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-900/10 dark:border-zinc-700 dark:bg-zinc-950/60 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:ring-zinc-100/10'
+  'w-full rounded-thumb border border-hairline bg-surface px-3 py-2.5 text-sm text-ink transition-colors duration-150 ease-quart placeholder:text-ghost focus:border-accent focus:outline-none'
+
+const btnQuiet =
+  'inline-flex shrink-0 items-center justify-center gap-1.5 rounded-pill bg-fill font-medium text-body transition-[background-color,transform] duration-150 ease-quart hover:bg-fill-strong active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40'
 
 // 取值与后端 model 包协议常量一致。
 const PROTOCOLS: Array<{ value: string; label: string }> = [
@@ -85,7 +88,14 @@ export default function SettingsModal({
     }
   }, [open, settings])
 
-  if (!open) return null
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open, onClose])
 
   const editing = draft.providers[editingIdx]
 
@@ -203,41 +213,48 @@ export default function SettingsModal({
   }
 
   return (
+    // 弹窗保持挂载，让退出动画能沿进入的同一条路径走完；
+    // 关闭时 inert 既挡住交互也移出键盘顺序。
     <div
-      className="animate-fade-in fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/40 p-4 backdrop-blur-[2px]"
+      className={`fixed inset-0 z-50 flex items-center justify-center p-4 ${
+        open ? '' : 'pointer-events-none'
+      }`}
       role="dialog"
       aria-modal="true"
       aria-label="AI 设置"
+      aria-hidden={!open}
+      inert={!open}
     >
-      <div className="animate-fade-up flex max-h-[90vh] w-[600px] max-w-full flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-900">
-        <div className="flex h-14 shrink-0 items-center justify-between border-b border-zinc-100 px-6 dark:border-zinc-800">
-          <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+      <div className="scrim absolute inset-0" data-open={open} onClick={onClose} />
+      <div
+        data-open={open}
+        className="modal glass-sheet relative flex max-h-[90vh] w-[600px] max-w-full flex-col overflow-hidden rounded-panel border border-hairline shadow-overlay"
+      >
+        <div className="flex h-14 shrink-0 items-center justify-between border-b border-hairline px-6">
+          <h2 className="text-[15px] font-semibold tracking-[-0.01em] text-ink">
             AI 设置 · 供应商
           </h2>
           <button
             onClick={onClose}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:text-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-pill text-quiet transition-[background-color,color,transform] duration-150 ease-quart hover:bg-fill hover:text-ink active:scale-[0.94] max-sm:h-11 max-sm:w-11"
             aria-label="关闭"
           >
             <X className="h-4 w-4" aria-hidden="true" />
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-6">
+        <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-6">
           {/* 供应商列表 */}
           <div>
             <div className="mb-2 flex items-center justify-between">
-              <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">供应商</span>
-              <button
-                onClick={addProvider}
-                className="inline-flex h-7 items-center gap-1 rounded-lg border border-dashed border-zinc-300 px-2 text-xs text-zinc-500 transition-colors hover:border-zinc-400 hover:text-zinc-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-600 dark:hover:text-zinc-200"
-              >
+              <span className="text-[13px] font-medium text-body">供应商</span>
+              <button onClick={addProvider} className={`${btnQuiet} h-7 px-2.5 text-xs`}>
                 <Plus className="h-3.5 w-3.5" aria-hidden="true" />
                 添加
               </button>
             </div>
             {draft.providers.length === 0 ? (
-              <p className="rounded-lg border border-dashed border-zinc-200 px-3 py-4 text-center text-xs text-zinc-400 dark:border-zinc-700 dark:text-zinc-500">
+              <p className="rounded-thumb border border-dashed border-hint px-3 py-4 text-center text-xs text-quiet">
                 尚未添加供应商，点击「添加」开始配置
               </p>
             ) : (
@@ -246,24 +263,21 @@ export default function SettingsModal({
                   <button
                     key={p.id}
                     onClick={() => selectEditing(i)}
-                    className={`inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs transition-colors ${
+                    className={`inline-flex h-8 items-center gap-1.5 rounded-pill px-3 text-xs transition-[background-color,color,transform] duration-200 ease-quart active:scale-[0.97] ${
                       i === editingIdx
-                        ? 'border-zinc-900 bg-zinc-900 text-white dark:border-zinc-100 dark:bg-zinc-100 dark:text-zinc-900'
-                        : 'border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-zinc-500'
+                        ? 'bg-ink font-semibold text-surface'
+                        : 'bg-fill text-body hover:bg-fill-strong'
                     }`}
                   >
                     {settings.active_provider_id === p.id && (
-                      <span
-                        className="h-1.5 w-1.5 rounded-full bg-emerald-500"
-                        aria-hidden="true"
-                      />
+                      <span className="h-1.5 w-1.5 rounded-full bg-live" aria-hidden="true" />
                     )}
                     {p.name || '未命名'}
                   </button>
                 ))}
               </div>
             )}
-            <p className="mt-1.5 text-[11px] text-zinc-400 dark:text-zinc-500">
+            <p className="mt-2 text-[11px] text-quiet">
               绿点标记当前使用的供应商；在主页「开始分析」旁的下拉中切换。
             </p>
           </div>
@@ -272,9 +286,7 @@ export default function SettingsModal({
             <>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="mb-1.5 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                    名称
-                  </label>
+                  <label className="mb-1.5 block text-[13px] font-medium text-body">名称</label>
                   <input
                     value={editing.name}
                     onChange={(e) => patchProvider({ name: e.target.value })}
@@ -284,7 +296,7 @@ export default function SettingsModal({
                   />
                 </div>
                 <div>
-                  <label className="mb-1.5 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                  <label className="mb-1.5 block text-[13px] font-medium text-body">
                     接口类型
                   </label>
                   <div className="relative">
@@ -300,7 +312,7 @@ export default function SettingsModal({
                       ))}
                     </select>
                     <ChevronDown
-                      className="pointer-events-none absolute top-1/2 right-3 h-4 w-4 -translate-y-1/2 text-zinc-400"
+                      className="pointer-events-none absolute top-1/2 right-3 h-4 w-4 -translate-y-1/2 text-ghost"
                       aria-hidden="true"
                     />
                   </div>
@@ -308,9 +320,7 @@ export default function SettingsModal({
               </div>
 
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                  Base URL
-                </label>
+                <label className="mb-1.5 block text-[13px] font-medium text-body">Base URL</label>
                 <input
                   value={editing.base_url}
                   onChange={(e) => patchProvider({ base_url: e.target.value })}
@@ -321,8 +331,8 @@ export default function SettingsModal({
               </div>
 
               <div>
-                <label className="mb-1.5 flex items-center gap-1.5 text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                  <KeyRound className="h-3.5 w-3.5 text-zinc-400" aria-hidden="true" />
+                <label className="mb-1.5 flex items-center gap-1.5 text-[13px] font-medium text-body">
+                  <KeyRound className="h-3.5 w-3.5 text-ghost" aria-hidden="true" />
                   API Key
                 </label>
                 <input
@@ -338,17 +348,15 @@ export default function SettingsModal({
 
               {/* 已添加模型 */}
               <div>
-                <div className="mb-1.5 flex items-center justify-between">
-                  <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                    模型
-                  </span>
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-[13px] font-medium text-body">模型</span>
                   <button
                     onClick={() => void handleFetchModels()}
                     disabled={fetching || saving}
-                    className="inline-flex h-7 items-center gap-1 rounded-lg border border-zinc-200 px-2 text-xs text-zinc-600 transition-colors hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                    className={`${btnQuiet} h-7 px-2.5 text-xs`}
                   >
                     {fetching ? (
-                      <span className="h-3 w-3 animate-spin rounded-full border-2 border-zinc-400 border-t-transparent" />
+                      <span className="h-3 w-3 animate-spin rounded-full border-2 border-quiet border-t-transparent" />
                     ) : (
                       <RefreshCw className="h-3 w-3" aria-hidden="true" />
                     )}
@@ -359,16 +367,16 @@ export default function SettingsModal({
                   {editing.models.map((m) => (
                     <span
                       key={m}
-                      className={`inline-flex h-7 items-center gap-1 rounded-full border px-2.5 text-xs ${
+                      className={`inline-flex h-7 items-center gap-1 rounded-pill px-2.5 text-xs ${
                         draft.active_provider_id === editing.id && draft.active_model === m
-                          ? 'border-emerald-500/50 bg-emerald-50 text-emerald-700 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
-                          : 'border-zinc-200 text-zinc-600 dark:border-zinc-700 dark:text-zinc-300'
+                          ? 'bg-accent-tint font-medium text-accent-deep'
+                          : 'bg-fill text-body'
                       }`}
                     >
                       {m}
                       <button
                         onClick={() => removeModel(m)}
-                        className="text-zinc-400 transition-colors hover:text-rose-500"
+                        className="text-quiet transition-colors duration-150 ease-quart hover:text-danger"
                         aria-label={`删除模型 ${m}`}
                       >
                         <X className="h-3 w-3" aria-hidden="true" />
@@ -376,12 +384,12 @@ export default function SettingsModal({
                     </span>
                   ))}
                   {editing.models.length === 0 && (
-                    <span className="text-xs text-zinc-400 dark:text-zinc-500">
+                    <span className="text-xs text-quiet">
                       暂无模型，可手动添加或点「获取模型」后点选
                     </span>
                   )}
                 </div>
-                <div className="mt-2 flex gap-2">
+                <div className="mt-2.5 flex gap-2">
                   <input
                     value={newModel}
                     onChange={(e) => setNewModel(e.target.value)}
@@ -392,7 +400,7 @@ export default function SettingsModal({
                       }
                     }}
                     placeholder="手动输入模型 ID，如 deepseek-chat"
-                    className={`${inputCls} h-9 py-0 flex-1`}
+                    className={`${inputCls} h-9 flex-1 py-0`}
                     spellCheck={false}
                   />
                   <button
@@ -401,7 +409,7 @@ export default function SettingsModal({
                       setNewModel('')
                     }}
                     disabled={!newModel.trim()}
-                    className="inline-flex h-9 shrink-0 items-center gap-1 rounded-lg border border-zinc-200 px-3 text-xs text-zinc-600 transition-colors hover:bg-zinc-50 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                    className={`${btnQuiet} h-9 px-3.5 text-xs`}
                   >
                     <Plus className="h-3.5 w-3.5" aria-hidden="true" />
                     添加
@@ -411,14 +419,14 @@ export default function SettingsModal({
 
               {/* 获取结果待选区：点哪个加哪个，已添加的置灰 */}
               {available.length > 0 && (
-                <div className="rounded-lg border border-dashed border-zinc-300 p-3 dark:border-zinc-700">
+                <div className="rounded-thumb border border-dashed border-hint p-3">
                   <div className="mb-2 flex items-center justify-between">
-                    <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                    <span className="text-xs font-medium text-muted">
                       可用模型（点击添加，已添加的置灰）
                     </span>
                     <button
                       onClick={() => setAvailable([])}
-                      className="text-zinc-400 transition-colors hover:text-zinc-600 dark:hover:text-zinc-200"
+                      className="text-quiet transition-colors duration-150 ease-quart hover:text-ink"
                       aria-label="收起可用模型"
                     >
                       <X className="h-3.5 w-3.5" aria-hidden="true" />
@@ -432,10 +440,10 @@ export default function SettingsModal({
                           key={m}
                           onClick={() => addModel(m)}
                           disabled={added}
-                          className={`inline-flex h-7 items-center gap-1 rounded-full border px-2.5 text-xs transition-colors ${
+                          className={`inline-flex h-7 items-center gap-1 rounded-pill px-2.5 text-xs transition-[background-color,transform] duration-150 ease-quart ${
                             added
-                              ? 'cursor-default border-emerald-500/40 bg-emerald-50 text-emerald-600 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-400'
-                              : 'border-zinc-300 text-zinc-700 hover:border-zinc-500 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800'
+                              ? 'cursor-default bg-success-tint text-success'
+                              : 'bg-fill text-body hover:bg-fill-strong active:scale-[0.97]'
                           }`}
                         >
                           {added && <Check className="h-3 w-3" aria-hidden="true" />}
@@ -450,7 +458,7 @@ export default function SettingsModal({
               <button
                 onClick={removeProvider}
                 disabled={saving}
-                className="inline-flex items-center gap-1.5 text-xs text-rose-500 transition-colors hover:text-rose-600 disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 text-xs text-danger transition-opacity duration-150 ease-quart hover:opacity-75 disabled:opacity-40"
               >
                 <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                 删除该供应商
@@ -458,50 +466,32 @@ export default function SettingsModal({
             </>
           )}
 
-          {localError && (
-            <div className="flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-              {localError}
-            </div>
-          )}
-          {error && !localError && (
-            <div className="flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-              {error}
-            </div>
-          )}
-          {notice && (
-            <div className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300">
-              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-              {notice}
-            </div>
-          )}
+          {localError && <Notice kind="danger" text={localError} />}
+          {error && !localError && <Notice kind="danger" text={error} />}
+          {notice && <Notice kind="success" text={notice} />}
         </div>
 
-        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-zinc-100 px-6 py-4 dark:border-zinc-800">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-hairline px-6 py-4">
           <button
             onClick={() => void handleTest()}
             disabled={testing || saving || !editing}
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-zinc-200 px-3.5 text-sm text-zinc-600 transition-colors hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            className={`${btnQuiet} h-9 px-3.5 text-sm`}
           >
             {testing ? (
-              <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-400 border-t-transparent" />
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-quiet border-t-transparent" />
             ) : (
               <Plug className="h-4 w-4" aria-hidden="true" />
             )}
             {testing ? '测试中…' : '测试连接'}
           </button>
           <div className="flex gap-3">
-            <button
-              onClick={onClose}
-              className="inline-flex h-9 items-center rounded-lg border border-zinc-200 px-4 text-sm text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-            >
+            <button onClick={onClose} className={`${btnQuiet} h-9 px-4 text-sm max-sm:h-11`}>
               取消
             </button>
             <button
               onClick={handleSave}
               disabled={saving || testing}
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-zinc-900 px-4 text-sm font-medium text-white transition-colors hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+              className="inline-flex h-9 items-center gap-1.5 rounded-pill bg-accent px-4 text-sm font-medium text-white transition-[background-color,transform,opacity] duration-150 ease-quart hover:bg-accent-deep active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40 disabled:active:scale-100 max-sm:h-11"
             >
               <Save className="h-4 w-4" aria-hidden="true" />
               {saving ? '保存中…' : '保存'}
@@ -509,6 +499,25 @@ export default function SettingsModal({
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+// Notice 是就地提示条：底色取自状态色，不加边框。
+function Notice({ kind, text }: { kind: 'danger' | 'success'; text: string }) {
+  const isDanger = kind === 'danger'
+  return (
+    <div
+      className={`flex items-start gap-2 rounded-thumb px-3 py-2.5 text-sm ${
+        isDanger ? 'bg-danger-tint text-danger' : 'bg-success-tint text-success'
+      }`}
+    >
+      {isDanger ? (
+        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+      ) : (
+        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+      )}
+      {text}
     </div>
   )
 }

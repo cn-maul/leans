@@ -14,6 +14,9 @@ frontend/dist/
 .idea/
 .zcode/
 
+# WorkBuddy 工作区（memory 含本机环境信息，不入库）
+.workbuddy/
+
 # 系统/备份
 *.log
 *~

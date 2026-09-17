@@ -130,7 +130,7 @@ function App() {
   const hasResult = Boolean(result) && !analysisLoading
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
+    <div className="flex h-screen flex-col overflow-hidden bg-ground text-ink">
       <TopBar
         lectureName={lectureName}
         view={view}
@@ -142,13 +142,13 @@ function App() {
         running={analysisLoading}
       />
 
-      <main className="mx-auto flex min-h-0 w-full max-w-[1680px] flex-1 gap-4 p-4">
+      <main className="mx-auto flex min-h-0 w-full max-w-[1680px] flex-1 gap-4 p-4 max-lg:flex-col max-lg:overflow-y-auto">
         {view === 'stats' ? (
           <StatsPage />
         ) : (
           <>
-            {/* 左栏：固定视口高度，上半紧凑输入，下半标注视图为主 */}
-            <section className="flex h-full w-[57%] min-w-0 flex-col gap-3">
+            {/* 左栏：上半紧凑输入，下半标注视图为主 */}
+            <section className="flex h-full w-[57%] min-w-0 flex-col gap-3 max-lg:h-auto max-lg:w-full">
               <QuestionInput
                 question={question}
                 onChange={setQuestion}
@@ -172,7 +172,7 @@ function App() {
             </section>
 
             {/* 右栏：三胶囊 + 技巧应用 + 注释和思路 */}
-            <section className="flex h-full min-w-0 flex-1 flex-col gap-3">
+            <section className="flex h-full min-w-0 flex-1 flex-col gap-3 max-lg:h-auto">
               <ResultPills result={result} loading={analysisLoading} partial={partial} />
               <TechniquePanel result={result} loading={analysisLoading} partial={partial} />
               <AnnotationPanel
@@ -196,7 +196,7 @@ function App() {
           history.length > 0 ? (
             <button
               onClick={() => void clear()}
-              className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg py-2 text-sm text-rose-500 transition-colors hover:bg-rose-50 dark:hover:bg-rose-950/40"
+              className="inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-sheet text-sm font-medium text-danger transition-colors duration-150 ease-quart hover:bg-danger-tint active:scale-[0.99]"
             >
               <Trash2 className="h-4 w-4" aria-hidden="true" />
               清空历史记录
@@ -219,7 +219,7 @@ function App() {
 
       {/* 轻提示 */}
       {toast && (
-        <div className="animate-fade-up fixed bottom-6 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2 rounded-full bg-zinc-900 py-2.5 pr-5 pl-4 text-sm text-white shadow-lg dark:bg-zinc-100 dark:text-zinc-900">
+        <div className="animate-rise fixed bottom-6 left-1/2 z-[60] flex items-center gap-2 rounded-pill bg-ink py-2.5 pr-5 pl-4 text-sm text-surface shadow-overlay">
           <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
           {toast}
         </div>
