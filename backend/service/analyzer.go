@@ -111,6 +111,11 @@ func (a *Analyzer) Analyze(ctx context.Context, opt AnalyzeOption) (*model.Analy
 		}
 		response, u, err := a.ai.ChatCompletion(ctx, messages)
 		if err != nil {
+			// 空回复（含「只输出思考」）追加严格 JSON 提醒后重试一次仍可能
+			// 拿到正文；其余错误（鉴权/网络/协议）重试无意义，直接上抛。
+			if errors.Is(err, ErrEmptyCompletion) && attempt == 0 {
+				continue
+			}
 			return nil, fmt.Errorf("AI 调用失败: %w", err)
 		}
 		if u != nil {
@@ -153,7 +158,8 @@ func (a *Analyzer) AnalyzeStream(ctx context.Context, opt AnalyzeOption, cb Stre
 	}
 
 	content, usage, firstTokenMS, serr := a.ai.ChatCompletionStream(ctx, messages, cb.OnDelta)
-	if serr != nil {
+	if serr != nil && content == "" {
+		// 一个字都没收到（空回复 / 截断 / 网络错误）：直接失败。
 		return nil, fmt.Errorf("AI 调用失败: %w", serr)
 	}
 

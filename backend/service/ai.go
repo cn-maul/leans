@@ -252,13 +252,25 @@ func toModelUsage(u rosetta.Usage) *model.Usage {
 	}
 }
 
+// ErrEmptyCompletion 表示上游返回成功但没有任何可用正文：内容为空，或只有
+// 思考内容（reasoning_content）。它属于可重试失败——调用方追加约束后重试
+// 一次仍可能拿到正文，因此用哨兵与网络/鉴权类硬错误区分开。
+var ErrEmptyCompletion = errors.New("AI 返回空内容")
+
 // translateErr 把 rosetta 错误翻译成前端可读的消息，格式与旧实现一致。
+// 哨兵一律用 errors.Is 判定：rosetta 的哨兵错误经 %w 包装，用 == 恒为 false。
 func translateErr(err error) error {
 	switch {
 	case errors.Is(err, rosetta.ErrNoAPIKey):
 		return fmt.Errorf("%w: 未配置 API Key，请先在设置中填写", ErrNotConfigured)
 	case errors.Is(err, rosetta.ErrNoEndpoint):
 		return fmt.Errorf("%w: 未配置 API Base URL", ErrNotConfigured)
+	case errors.Is(err, rosetta.ErrStreamTruncated):
+		// 上游（或中间网关）在收尾事件之前断开了连接：已收到的增量仍可用，
+		// 调用方应保留它们，必要时改用非流式重试一次。
+		return fmt.Errorf("上游连接中断，未收到完整结果，请重试")
+	case errors.Is(err, rosetta.ErrStreamOverflow):
+		return fmt.Errorf("上游返回内容异常庞大，已被安全上限截断，请重试或缩小题目范围")
 	}
 	var apiErr *rosetta.APIError
 	if errors.As(err, &apiErr) {
@@ -294,7 +306,17 @@ func (s *AIService) ChatCompletion(ctx context.Context, messages []model.ChatMes
 	if err != nil {
 		return "", nil, translateErr(err)
 	}
-	return resp.Text(), toModelUsage(resp.Usage), nil
+	usage := toModelUsage(resp.Usage)
+	if text := resp.Text(); text != "" {
+		return text, usage, nil
+	}
+	// 正文为空：区分「思考型模型把预算烧在思考上」与「上游真给了空回复」，
+	// 否则调用方只能拿到一个没有任何线索的空串。
+	if thinking := resp.ThinkingText(); thinking != "" {
+		return "", usage, fmt.Errorf("%w: 模型只输出了思考内容、未产出正文（思考 %d 字符，stop=%s，可能 max_tokens 被思考阶段耗尽）",
+			ErrEmptyCompletion, len(thinking), stopLabel(resp.StopReason))
+	}
+	return "", usage, fmt.Errorf("%w: 模型返回了空内容（stop=%s）", ErrEmptyCompletion, stopLabel(resp.StopReason))
 }
 
 // ChatCompletionStream 流式调用，每收到一段内容增量就调用一次 onDelta。
@@ -325,29 +347,60 @@ func (s *AIService) ChatCompletionStream(ctx context.Context, messages []model.C
 	defer stream.Close()
 
 	var content strings.Builder
+	var thinking strings.Builder
 	var firstTokenMS int64
+	var stopReason rosetta.StopReason
 	for stream.Next() {
 		ev := stream.Event()
-		if ev.Type != rosetta.EventTextDelta {
-			continue
-		}
-		if firstTokenMS == 0 {
-			firstTokenMS = time.Since(start).Milliseconds()
-		}
-		content.WriteString(ev.Text)
-		if onDelta != nil {
-			onDelta(ev.Text)
+		switch ev.Type {
+		case rosetta.EventThinkingDelta:
+			// 思考增量同样是「上游开始回应」的证据：思考型模型可能几十秒
+			// 只有思考、没有正文，首字耗时按它计算才真实。
+			if firstTokenMS == 0 {
+				firstTokenMS = time.Since(start).Milliseconds()
+			}
+			thinking.WriteString(ev.Text)
+		case rosetta.EventTextDelta:
+			if firstTokenMS == 0 {
+				firstTokenMS = time.Since(start).Milliseconds()
+			}
+			content.WriteString(ev.Text)
+			if onDelta != nil {
+				onDelta(ev.Text)
+			}
+		case rosetta.EventMessageEnd:
+			stopReason = ev.StopReason
 		}
 	}
+	usage := toModelUsage(stream.Usage())
 	if err := stream.Err(); err != nil {
-		return content.String(), nil, firstTokenMS, translateErr(err)
+		// 截断时已收到的增量仍有价值，一并返回，由调用方决定怎么用
+		// （AnalyzeStream 会在内容非空时走解析/非流式重试，而不是整条丢弃）。
+		return content.String(), usage, firstTokenMS, translateErr(err)
 	}
 
-	usage := toModelUsage(stream.Usage())
 	if content.Len() == 0 {
-		return "", usage, firstTokenMS, fmt.Errorf("流式响应中没有内容")
+		tok := usageTokens(usage)
+		switch {
+		case thinking.Len() > 0:
+			return "", usage, firstTokenMS, fmt.Errorf("%w: 模型只输出了思考内容、未产出正文（思考 %d 字符，stop=%s，可能 max_tokens 被思考阶段耗尽）",
+				ErrEmptyCompletion, thinking.Len(), stopLabel(stopReason))
+		case stopReason != "":
+			return "", usage, firstTokenMS, fmt.Errorf("%w: 模型返回了空内容（stop=%s，思考 0 字符，输入 %d / 输出 %d tokens）",
+				ErrEmptyCompletion, stopLabel(stopReason), tok.prompt, tok.completion)
+		default:
+			return "", usage, firstTokenMS, fmt.Errorf("%w: 流式响应中没有内容（未收到终止事件）", ErrEmptyCompletion)
+		}
 	}
 	return content.String(), usage, firstTokenMS, nil
+}
+
+// stopLabel 渲染终止原因，空值显示为「无」而不是在文案里留白。
+func stopLabel(r rosetta.StopReason) string {
+	if r == "" {
+		return "无"
+	}
+	return string(r)
 }
 
 // FetchModels 从服务端拉取可用模型 ID 列表（GET /models），供设置

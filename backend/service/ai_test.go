@@ -107,7 +107,9 @@ func TestChatCompletionStreamNoContent(t *testing.T) {
 
 	svc := newTestService(t, srv.URL)
 	_, _, _, err := svc.ChatCompletionStream(context.Background(), []model.ChatMessage{{Role: "user", Content: "hi"}}, nil)
-	if err == nil || !strings.Contains(err.Error(), "流式响应中没有内容") {
+	// 只发了 [DONE]、没有 finish_reason：SDK 把终止原因归为 other。文案必须
+	// 带上它，否则调用方无从判断是上游空回复还是流被掐断。
+	if !errors.Is(err, ErrEmptyCompletion) || !strings.Contains(err.Error(), "stop=other") {
 		t.Fatalf("err = %v", err)
 	}
 }
