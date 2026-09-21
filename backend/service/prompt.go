@@ -44,11 +44,11 @@ const analysisPrompt = `你是公务员考试题目分析专家。根据讲义�
 }
 
 ## 原则
-1. 先判断题型，再匹配技巧；highlights 覆盖题型判断、技巧命中、答案主旨、错误/转折、关键信息等词句，module 与含义一一对应
-2. text 必须能在题目原文逐字找到；location 只能是"题干"或"选项A"…"选项D"
+1. 先判断题型，再匹配技巧。**标注务必求全**：请逐一检查题干与每一个选项，凡下列有价值点的词句都要各自单独成条标注，不要因怕多而漏标——题型判断特征词(module=category)、命中技巧的判断依据(module=rule)、正确选项的答案主旨依据(module=annotation)、每个错误选项"错在哪"(module=error，如偷换概念/绝对化/无中生有/偏离主旨/强加逻辑)、题干关键信息与转折(module=info)。至少保证 category、正确答案依据各有标注，并尽量为每个错误选项标出一条错因
+2. text 必须能在题目原文逐字找到（截取关键词句即可，不必整句）；location 只能是"题干"或"选项A"…"选项H"
 3. rules 只能引用"讲义章节"中实际出现的内容并注明章节；rules 的每个对象只允许 name、section、usage 三个字段；usage 必填，必须结合本题题干词句说明技巧怎么用，禁止照抄讲义原文；讲义没有对应技巧时 rules 返回空数组，禁止编造规则
 4. category 必须从题型清单中选择；清单没有明确对应时选择最接近的，并在 highlights 中用 module=category 标注判断词句
-5. 严格控制长度：highlights≤5条、rules≤2条、每个usage≤60字、annotation≤150字、每个explanation≤15字。宁可精简，不要冗长。`
+5. 长度限制只针对文字说明、不限制标注密度：每个usage≤60字、annotation≤150字、每个explanation≤15字、rules≤2条；highlights 上限放宽到 ≤12 条以保证覆盖，宁可标多标全，也不要为省字而漏标。`
 
 // subjectivePrompt 是申论等主观题的"正文"模板：JSON 结构与客观题一致，
 // 差异在于——无选项、answer 是一段话参考答案、highlights 标注给定材料原句、
