@@ -66,7 +66,7 @@ export function useAnalysis() {
   const isAbort = (e: unknown) =>
     e instanceof DOMException && e.name === 'AbortError'
 
-  const run = useCallback(async (subject: string, question: string) => {
+  const run = useCallback(async (subject: string, question: string, userAnswer?: string) => {
     // 新的一次运行会替换旧的 controller；旧请求若仍在飞行中先中止。
     abortRef.current?.abort()
     const controller = new AbortController()
@@ -100,6 +100,7 @@ export function useAnalysis() {
           },
         },
         controller.signal,
+        userAnswer,
       )
       setResult(res)
       setStage('done')
@@ -108,7 +109,7 @@ export function useAnalysis() {
       // 旧版后端无流式端点时回退非流式接口。
       if (e instanceof api.ApiError && e.status === 404) {
         try {
-          const res = await api.analyzeQuestion(subject, question, controller.signal)
+          const res = await api.analyzeQuestion(subject, question, controller.signal, userAnswer)
           setResult(res)
           setStage('done')
           return res

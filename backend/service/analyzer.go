@@ -37,6 +37,7 @@ func NewAnalyzer(ai *AIService, subjects *subject.Store, store *storage.Store, c
 type AnalyzeOption struct {
 	Subject     string
 	Content     string
+	UserAnswer  string // 主观题（申论）中用户自己的作答，可空
 	SaveHistory bool
 }
 
@@ -62,7 +63,7 @@ func (a *Analyzer) buildPrompt(opt AnalyzeOption) ([]model.ChatMessage, error) {
 		OverviewMax: a.cfg.OverviewMax,
 	})
 	typeCatalog := a.subjects.TypeCatalog(opt.Subject, 30)
-	return BuildAnalysisPrompt(sub.Name, hits, typeCatalog, opt.Content, false, a.cfg.LectureBudget), nil
+	return BuildAnalysisPrompt(sub.Name, sub.Kind, hits, typeCatalog, opt.Content, opt.UserAnswer, false, a.cfg.LectureBudget), nil
 }
 
 // fillMeta 统一填充 meta 并入库。
@@ -210,6 +211,7 @@ func (a *Analyzer) saveHistory(opt AnalyzeOption, result *model.AnalyzeResponse)
 	if _, err := a.store.AddHistory(model.HistoryItem{
 		Subject:      opt.Subject,
 		Question:     opt.Content,
+		UserAnswer:   opt.UserAnswer,
 		Category:     result.Category,
 		Result:       jsonStr,
 		Model:        result.Meta.Model,

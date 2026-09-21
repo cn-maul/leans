@@ -263,7 +263,7 @@ func TestBuildAnalysisPrompt(t *testing.T) {
 		{Title: "第一章 总体概述", Content: "讲义整体框架说明……"},
 	}
 	types := []string{"中心理解", "细节理解", "语句排序"}
-	msgs := BuildAnalysisPrompt("言语理解", hits, types, "这段文字意在强调什么？", false, 6000)
+	msgs := BuildAnalysisPrompt("言语理解", subject.KindChoice, hits, types, "这段文字意在强调什么？", "", false, 6000)
 	if len(msgs) != 2 {
 		t.Fatalf("messages = %d, want 2", len(msgs))
 	}
@@ -292,7 +292,7 @@ func TestBuildAnalysisPrompt(t *testing.T) {
 	}
 	// 讲义注入量受预算限制。
 	big := subject.Hit{Title: "第二章 对策题", Content: strings.Repeat("甲", 20000)}
-	msgs = BuildAnalysisPrompt("言语理解", []subject.Hit{big}, nil, "题目", false, 6000)
+	msgs = BuildAnalysisPrompt("言语理解", subject.KindChoice, []subject.Hit{big}, nil, "题目", "", false, 6000)
 	if len([]rune(msgs[1].Content)) > 10000 {
 		t.Errorf("lecture injection not capped: %d chars", len([]rune(msgs[1].Content)))
 	}
@@ -301,6 +301,38 @@ func TestBuildAnalysisPrompt(t *testing.T) {
 	}
 	// 题干不应超出注入上限（此处内容短，不会截断，但至少验证不 panic）。
 	_ = model.AnalyzeResponse{}
+}
+
+// TestBuildAnalysisPromptSubjective 验证申论模板：无选项措辞、answer 为参考答案、
+// 提供"我的作答"时注入 grading 字段与批改原则。
+func TestBuildAnalysisPromptSubjective(t *testing.T) {
+	hits := []subject.Hit{
+		{Title: "第二章 归纳概括题", Content: "查找关键词的基本原则……"},
+	}
+	types := []string{"归纳概括题", "提出对策题", "文章写作题"}
+
+	// 未提交作答：不含 grading / 我的作答。
+	msgs := BuildAnalysisPrompt("申论", subject.KindSubjective, hits, types, "根据给定资料概括……", "", false, 6000)
+	body := msgs[1].Content
+	if !strings.Contains(body, "申论解题与批改专家") {
+		t.Errorf("subjective template not used: %s", body[:120])
+	}
+	if strings.Contains(body, `"grading"`) || strings.Contains(body, "【我的作答】") {
+		t.Errorf("grading injected without user answer")
+	}
+
+	// 提交作答：注入我的作答段落 + grading 字段 + 批改原则。
+	msgs = BuildAnalysisPrompt("申论", subject.KindSubjective, hits, types, "根据给定资料概括……", "1. 完善了相关法律", false, 6000)
+	body = msgs[1].Content
+	if !strings.Contains(body, "【我的作答】") {
+		t.Errorf("user answer not embedded")
+	}
+	if !strings.Contains(body, `"grading"`) {
+		t.Errorf("grading fragment missing when user answer present")
+	}
+	if !strings.Contains(body, "禁止给分数") {
+		t.Errorf("grading principle missing")
+	}
 }
 
 func TestSyncJudgmentsFromNested(t *testing.T) {
@@ -320,5 +352,38 @@ func TestSyncJudgmentsFromNested(t *testing.T) {
 	}
 	if res.TypeJudgment.Basis[0].Location != "题干" || res.Rules[0].Marks[0].Location != "选项A" {
 		t.Errorf("location not normalized: %+v / %+v", res.TypeJudgment.Basis, res.Rules)
+	}
+}
+
+// TestParseAnalysisResponseGrading 校验申论批改 JSON 能正确反序列化到 Grading。
+func TestParseAnalysisResponseGrading(t *testing.T) {
+	raw := `{
+  "type_judgment": {"category": "归纳概括题", "sub_category": "概括做法"},
+  "answer": "1. 完善法规；2. 加强监管。",
+  "annotation": "先审题确定主体，再按段提炼做法。",
+  "highlights": [{"text": "完善相关法律", "type": "采分点", "module": "info", "location": "材料第2段"}],
+  "grading": {
+    "points": [
+      {"point": "完善法规", "status": "hit", "source_ref": "完善相关法律", "user_ref": "健全了法律制度", "suggestion": ""},
+      {"point": "加强监管", "status": "miss", "source_ref": "强化日常监管", "user_ref": "", "suggestion": "补一条监管措施"}
+    ],
+    "summary": "踩中1个，遗漏1个"
+  }
+}`
+	res, err := ParseAnalysisResponse(raw)
+	if err != nil {
+		t.Fatalf("ParseAnalysisResponse: %v", err)
+	}
+	if res.Grading == nil || len(res.Grading.Points) != 2 {
+		t.Fatalf("grading not parsed: %+v", res.Grading)
+	}
+	if res.Grading.Points[0].Status != model.GradeHit || res.Grading.Points[1].Status != model.GradeMiss {
+		t.Errorf("status mismatch: %+v", res.Grading.Points)
+	}
+	if res.Grading.Points[0].UserRef != "健全了法律制度" {
+		t.Errorf("user_ref not parsed: %+v", res.Grading.Points[0])
+	}
+	if res.Grading.Summary != "踩中1个，遗漏1个" {
+		t.Errorf("summary not parsed: %q", res.Grading.Summary)
 	}
 }

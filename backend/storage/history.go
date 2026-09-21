@@ -7,9 +7,9 @@ import "leans/model"
 // analysis; model/tokens/耗时字段供历史列表和统计页使用。
 func (s *Store) AddHistory(rec model.HistoryItem) (int64, error) {
 	res, err := s.db.Exec(
-		`INSERT INTO history (subject, question, category, result, model, tokens, elapsed_ms, first_token_ms)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		rec.Subject, rec.Question, rec.Category, rec.Result, rec.Model,
+		`INSERT INTO history (subject, question, user_answer, category, result, model, tokens, elapsed_ms, first_token_ms)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		rec.Subject, rec.Question, rec.UserAnswer, rec.Category, rec.Result, rec.Model,
 		rec.Tokens, rec.ElapsedMS, rec.FirstTokenMS,
 	)
 	if err != nil {
@@ -50,10 +50,10 @@ func (s *Store) ListHistory(limit int) ([]model.HistoryItem, error) {
 func (s *Store) GetHistory(id int64) (*model.HistoryItem, error) {
 	var it model.HistoryItem
 	err := s.db.QueryRow(
-		`SELECT id, subject, question, category, result, model, tokens, elapsed_ms, first_token_ms, created_at
+		`SELECT id, subject, question, user_answer, category, result, model, tokens, elapsed_ms, first_token_ms, created_at
 		 FROM history WHERE id = ?`,
 		id,
-	).Scan(&it.ID, &it.Subject, &it.Question, &it.Category, &it.Result, &it.Model,
+	).Scan(&it.ID, &it.Subject, &it.Question, &it.UserAnswer, &it.Category, &it.Result, &it.Model,
 		&it.Tokens, &it.ElapsedMS, &it.FirstTokenMS, &it.CreatedAt)
 	if err != nil {
 		return nil, err

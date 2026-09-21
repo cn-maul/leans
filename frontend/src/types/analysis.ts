@@ -3,6 +3,11 @@ export interface Subject {
   name: string
 }
 
+// isSubjectiveName 与后端 subject.KindFor 保持一致：名称命中即按主观题（申论）处理。
+export function isSubjectiveName(name: string): boolean {
+  return ['申论', '作文', '大作文'].some((kw) => (name || '').includes(kw))
+}
+
 // AIProvider 是一个可切换的 AI 服务接入点；models 可手动维护或在线获取。
 // protocol 取值与后端 model 包常量一致：auto / openai-chat / openai-responses / anthropic。
 export interface AIProvider {
@@ -24,6 +29,7 @@ export interface HistoryItem {
   id: number
   subject: string
   question: string
+  user_answer?: string
   category: string
   result?: string
   model?: string
@@ -99,6 +105,21 @@ export interface AnalysisMeta {
   model?: string
 }
 
+// Grading 是申论批改结果：按采分点逐条比对，不给分数（无官方标准答案）。
+// source_ref 指向给定材料原句，user_ref 指向我的作答里踩中的句子（遗漏则空）。
+export interface GradingPoint {
+  point: string
+  status: 'hit' | 'partial' | 'miss' | string
+  source_ref?: string
+  user_ref?: string
+  suggestion?: string
+}
+
+export interface Grading {
+  points?: GradingPoint[]
+  summary?: string
+}
+
 // 流式过程中的增量解析结果：字段随 AI 输出逐步填充。
 export interface PartialAnalysis {
   category: string
@@ -132,6 +153,8 @@ export interface AnalysisResult {
   annotation?: string
   highlights: Highlight[]
   meta: AnalysisMeta
+  // 申论批改：仅当提交了我的作答时存在。
+  grading?: Grading | null
   // 兼容旧数据
   techniques?: TechniqueInfo[]
   applicable?: ApplicableRule[]

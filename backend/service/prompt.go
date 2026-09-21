@@ -50,10 +50,61 @@ const analysisPrompt = `你是公务员考试题目分析专家。根据讲义�
 4. category 必须从题型清单中选择；清单没有明确对应时选择最接近的，并在 highlights 中用 module=category 标注判断词句
 5. 严格控制长度：highlights≤5条、rules≤2条、每个usage≤60字、annotation≤150字、每个explanation≤15字。宁可精简，不要冗长。`
 
+// subjectivePrompt 是申论等主观题的"正文"模板：JSON 结构与客观题一致，
+// 差异在于——无选项、answer 是一段话参考答案、highlights 标注给定材料原句、
+// 且当提供了"我的作答"时通过 %s(grading) 追加逐采分点比对。
+const subjectivePrompt = `你是公务员考试申论解题与批改专家。根据讲义中的方法章节分析申论题，只输出 JSON，不要任何多余文字。
+
+## 无视觉约束
+你只能看到文本，看不到图片、图表或版式。若材料信息明显缺失，基于可见文字判断并在 annotation 中如实说明，不要编造。
+
+## 题型清单
+%s
+
+## 讲义章节（已按相关度挑选的方法与技巧）
+%s
+
+## 讲义整体概述
+%s
+
+## 题目（给定资料与作答要求）
+%s
+
+## 输出 JSON 结构
+{
+  "type_judgment": {
+    "category": "申论题型大类（从题型清单选择，如 归纳概括题/综合分析题/提出对策题/公文写作题/文章写作题）",
+    "sub_category": "具体子类（如 概括做法/概括问题/语句理解/写一份提纲 等，尽量从清单选择）"
+  },
+  "technique_judgment": {
+    "rules": [{"name": "方法名", "section": "讲义章节", "usage": "本方法在这道题怎么用：结合材料/题干具体词句说明（≤60字）"}]
+  },
+  "answer": "参考答案：按采分点组织的一段规范作答（要点可用 1.2.3. 分列），贴合字数要求",
+  "annotation": "解题思路（≤150字）：怎么审题、从哪些材料段提炼要点、如何归纳与分配字数；不要重复 rules.usage",
+  "highlights": [{"text": "材料中的关键原句", "type": "类型（≤6字）", "module": "category|rule|annotation|error|info", "location": "材料第N段 或 题干", "explanation": "为何重要（≤15字）"}]%s
+}
+
+## 原则
+1. 先判断题型，再匹配讲义方法；highlights 只标注**给定材料或题干里**逐字可寻、且对作答有采分价值的词句，module 与含义一一对应
+2. text 必须能在题目原文逐字找到；location 用"材料第N段"或"题干"
+3. rules 只能引用"讲义章节"中实际出现的方法并注明章节；每个对象只允许 name、section、usage 三个字段；usage 必填并结合本题词句，禁止照抄讲义原文；讲义无对应方法时 rules 返回空数组，禁止编造
+4. category 必须从题型清单选择；清单没有明确对应时选最接近的，并在 highlights 用 module=category 标注判断依据
+5. answer 与 annotation 不得重复：answer 是"标准作答本身"，annotation 是"怎么想出来的"
+6. 严格控制长度：highlights≤6条、rules≤3条、每个usage≤60字、annotation≤150字、每个explanation≤15字。宁可精简，不要冗长。`
+
+// gradingJSONFragment 是提供"我的作答"时插入到 JSON 结构中的批改字段说明。
+const gradingJSONFragment = `,
+  "grading": {
+    "points": [{"point": "参考答案应覆盖的一个采分点", "status": "hit|partial|miss", "source_ref": "材料中支撑该点的原句", "user_ref": "我的作答里踩中该点的句子（遗漏则留空）", "suggestion": "如何补齐或规范表述（≤30字）"}],
+    "summary": "一句话总体点评：踩中几个采分点、主要差距在哪"
+  }`
+
 // BuildAnalysisPrompt 用检索到的相关章节构造 system+user 消息。
+// kind 决定客观题/主观题模板；userAnswer 非空时（仅主观题有意义）追加"我的作答"
+// 并要求 AI 产出按采分点比对的 grading。
 // lectureBudget 控制讲义注入的字符上限（token 大头）。
 // 概述章节单独进"整体概述"槽位，避免与讲义正文重复注入。
-func BuildAnalysisPrompt(subName string, hits []subject.Hit, typeCatalog []string, question string, strictJSON bool, lectureBudget int) []model.ChatMessage {
+func BuildAnalysisPrompt(subName string, kind subject.Kind, hits []subject.Hit, typeCatalog []string, question string, userAnswer string, strictJSON bool, lectureBudget int) []model.ChatMessage {
 	var lecture strings.Builder
 	budget := lectureBudget
 	if budget <= 0 {
@@ -82,20 +133,34 @@ func BuildAnalysisPrompt(subName string, hits []subject.Hit, typeCatalog []strin
 
 	overview := buildOverview(overviewHits)
 	typeList := formatTypeCatalog(typeCatalog)
-	body := fmt.Sprintf(analysisPrompt, typeList, lecture.String(), overview, question)
+
+	var body string
+	system := fmt.Sprintf("你是一个专业的公务员考试分析助手，擅长%s题目。只输出 JSON。当前任务只有纯文本，没有图片、图表或公式输入。", subName)
+
+	if kind == subject.KindSubjective {
+		ua := strings.TrimSpace(userAnswer)
+		qSection := question
+		gradingSlot := ""
+		if ua != "" {
+			qSection += "\n\n【我的作答】\n" + ua
+			gradingSlot = gradingJSONFragment
+		}
+		body = fmt.Sprintf(subjectivePrompt, typeList, lecture.String(), overview, qSection, gradingSlot)
+		if ua != "" {
+			body += "\n7. 题目含【我的作答】时，grading.points 必须逐条比对参考答案应覆盖的采分点，只判 hit/partial/miss，禁止给分数，source_ref 必须是材料里逐字可寻的原句。"
+		}
+		system = fmt.Sprintf("你是一个专业的公务员考试申论批改助手，擅长%s。只输出 JSON。当前任务只有纯文本，没有图片、图表或公式输入。", subName)
+	} else {
+		body = fmt.Sprintf(analysisPrompt, typeList, lecture.String(), overview, question)
+	}
+
 	if strictJSON {
 		body += "\n【重要】只输出 JSON，禁止 markdown 代码块、注释或多余文字。"
 	}
 
 	return []model.ChatMessage{
-		{
-			Role:    "system",
-			Content: fmt.Sprintf("你是一个专业的公务员考试分析助手，擅长%s题目。只输出 JSON。当前任务只有纯文本，没有图片、图表或公式输入。", subName),
-		},
-		{
-			Role:    "user",
-			Content: body,
-		},
+		{Role: "system", Content: system},
+		{Role: "user", Content: body},
 	}
 }
 

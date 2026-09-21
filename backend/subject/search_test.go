@@ -75,3 +75,34 @@ func TestSearchTruncation(t *testing.T) {
 		t.Errorf("content not truncated: %d chars", len([]rune(hits[0].Content)))
 	}
 }
+
+// TestChunkedBM25Retrieval 验证：一个长 section 会被切成多块，BM25 能把最相关的
+// 那一块（而非整节）排到前面，标题路径带进 Hit.Title。
+func TestChunkedBM25Retrieval(t *testing.T) {
+	long := strings.Repeat("这是无关的填充内容用于撑长段落。", 40) // 远超 maxChunk，会被切开
+	md := "# 讲义\n## 第三章 主旨概括\n" +
+		long + "\n\n" +
+		"意图判断题的核心是识别言外之意，对策标志词如\"应该、必须、需要\"往往引出作者的意图与主张，抓住这些词就能定位主旨句。\n"
+	sub, err := ParseSubject("t", md)
+	if err != nil {
+		t.Fatalf("ParseSubject: %v", err)
+	}
+	if len(sub.chunks) < 2 {
+		t.Fatalf("expected the long section to split into multiple chunks, got %d", len(sub.chunks))
+	}
+	store := &Store{subjects: map[string]*Subject{"t": sub}}
+
+	hits := store.Search("t", "意图判断题如何用对策标志词定位主旨", Retrieval{MaxSections: 4, MaxChars: 2000, OverviewMax: 1})
+	if len(hits) == 0 {
+		t.Fatal("no hits")
+	}
+	// 命中的块正文应包含"意图判断/对策标志词"这段，而非无关填充块。
+	best := hits[0].Content
+	if !strings.Contains(best, "对策标志词") {
+		t.Errorf("top chunk should contain the query-relevant sentence, got: %.60s", best)
+	}
+	// Title 应带出章节路径。
+	if !strings.Contains(hits[0].Title, "主旨概括") {
+		t.Errorf("hit title should carry section path, got %q", hits[0].Title)
+	}
+}

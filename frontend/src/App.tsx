@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { CheckCircle2, Trash2 } from 'lucide-react'
 import { fetchHistoryItem } from './api/client'
 import type { AnalysisResult, Highlight, HistoryItem } from './types/analysis'
+import { isSubjectiveName } from './types/analysis'
 import { useAnalysis } from './hooks/useAnalysis'
 import { useHistory } from './hooks/useHistory'
 import { useSettings } from './hooks/useSettings'
@@ -18,14 +19,18 @@ import StatsPage from './components/StatsPage'
 import SettingsModal from './components/SettingsModal'
 import HistoryPanel from './components/HistoryPanel'
 import AnnotatedQuestion from './components/AnnotatedQuestion'
+import ShenlunPage, { type RestorePayload } from './components/ShenlunPage'
 import Drawer from './components/Drawer'
 
 function App() {
   const { subjects } = useSubjects()
 
-  // 讲义默认锁定第一门（当前仅言语理解），不再提供切换入口。
-  const selectedSubject = subjects[0]?.id || ''
-  const lectureName = subjects[0]?.name || '言语理解'
+  // 按科目种类各选各的讲义：言语页锁客观题，申论页锁主观题（申论）。
+  // 不再依赖 subjects[0]，避免加入申论后默认排序改变而劫持言语页。
+  const choiceSubject = subjects.find((s) => !isSubjectiveName(s.name))
+  const shenlunSubject = subjects.find((s) => isSubjectiveName(s.name))
+  const selectedSubject = choiceSubject?.id || ''
+  const lectureName = choiceSubject?.name || '言语理解'
 
   const [question, setQuestion] = useState('')
   const {
@@ -50,6 +55,9 @@ function App() {
   const [historyOpen, setHistoryOpen] = useState(false)
   const [toast, setToast] = useState('')
   const [validationError, setValidationError] = useState('')
+  // 申论页独立状态：历史恢复载荷 + 本页加载态（供 TopBar 进度条合并显示）。
+  const [shenlunRestore, setShenlunRestore] = useState<RestorePayload | null>(null)
+  const [shenlunRunning, setShenlunRunning] = useState(false)
 
   const handleAnalyze = async () => {
     const trimmed = question.trim()
@@ -67,22 +75,35 @@ function App() {
     void reload()
   }
 
-  // 历史回填：取完整记录（含结果 JSON），还原题目与分析结果。
+  // 历史回填：取完整记录（含结果 JSON），按科目种类落到对应页面。
   const handleHistorySelect = async (item: HistoryItem) => {
     try {
       const full = await fetchHistoryItem(item.id)
-      setQuestion(full.question)
       setValidationError('')
-      if (full.result) {
-        try {
-          setResult(JSON.parse(full.result) as AnalysisResult)
-        } catch {
-          setResult(null)
-        }
+      const parsed = full.result
+        ? (() => {
+            try {
+              return JSON.parse(full.result) as AnalysisResult
+            } catch {
+              return null
+            }
+          })()
+        : null
+
+      if (isSubjectiveName(full.subject)) {
+        // 申论记录 → 灌回申论页自己的状态。
+        setShenlunRestore({
+          material: full.question,
+          userAnswer: full.user_answer || undefined,
+          result: parsed,
+          nonce: Date.now(),
+        })
+        setView('shenlun')
       } else {
-        setResult(null)
+        setQuestion(full.question)
+        setResult(parsed)
+        setView('analyze')
       }
-      setView('analyze')
       setHistoryOpen(false)
       setToast('已恢复历史记录')
     } catch {
@@ -132,19 +153,33 @@ function App() {
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-ground text-ink">
       <TopBar
-        lectureName={lectureName}
+        lectureName={view === 'shenlun' ? shenlunSubject?.name || '申论' : lectureName}
         view={view}
         onViewChange={setView}
         onOpenHistory={() => setHistoryOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
         theme={theme}
         onToggleTheme={toggle}
-        running={analysisLoading}
+        running={analysisLoading || shenlunRunning}
       />
 
       <main className="mx-auto flex min-h-0 w-full max-w-[1680px] flex-1 gap-4 p-4 max-lg:flex-col max-lg:overflow-y-auto">
         {view === 'stats' ? (
           <StatsPage />
+        ) : view === 'shenlun' ? (
+          <ShenlunPage
+            subjectId={shenlunSubject?.id || ''}
+            hasSubject={Boolean(shenlunSubject)}
+            providers={settings.providers}
+            activeProviderId={settings.active_provider_id}
+            activeModel={settings.active_model}
+            onProviderChange={handleProviderChange}
+            onModelChange={handleModelChange}
+            onOpenSettings={() => setSettingsOpen(true)}
+            onAnalyzed={() => void reload()}
+            restore={shenlunRestore}
+            onRunningChange={setShenlunRunning}
+          />
         ) : (
           <>
             {/* 左栏：上半紧凑输入，下半标注视图为主 */}

@@ -5,6 +5,9 @@ import "encoding/json"
 type AnalyzeRequest struct {
 	Subject string `json:"subject" binding:"required"`
 	Content string `json:"content" binding:"required"`
+	// UserAnswer 是申论等主观题中用户自己的作答。可空：为空时只做"生成参考答案 +
+	// 材料标色"，非空时额外产出 Grading（按采分点比对，不给分数）。
+	UserAnswer string `json:"user_answer,omitempty"`
 }
 
 // Question 是结构化题目对象。输入层仍保持粘贴文本，后端负责把文本解析成
@@ -149,6 +152,8 @@ type AnalyzeResponse struct {
 	OptionAnalysis    []OptionAnalysis   `json:"option_analysis,omitempty"`
 	Evidence          []Evidence         `json:"evidence,omitempty"`
 	Quality           *AnalysisQuality   `json:"quality,omitempty"`
+	// Grading 仅在主观题且用户提交了作答时产出：按采分点比对参考答案与我的作答。
+	Grading *Grading `json:"grading,omitempty"`
 	Meta              AnalysisMeta       `json:"meta"`
 
 	// 兼容旧版字段
@@ -167,6 +172,29 @@ type ApplicableRule struct {
 	Section  string `json:"section"`
 	Usage    string `json:"usage"`
 	Example  string `json:"example"`
+}
+
+// GradingPointStatus 是采分点比对结果。
+const (
+	GradeHit     = "hit"     // 已踩中
+	GradePartial = "partial" // 部分踩中/表述不到位
+	GradeMiss    = "miss"    // 遗漏
+)
+
+// GradingPoint 是一个采分点的比对结论。SourceRef 指向给定材料中的依据原句，
+// UserRef 指向"我的作答"中踩中该点的句子（miss 时为空）；前端按文本落段标色。
+type GradingPoint struct {
+	Point      string `json:"point"`
+	Status     string `json:"status"`
+	SourceRef  string `json:"source_ref,omitempty"`
+	UserRef    string `json:"user_ref,omitempty"`
+	Suggestion string `json:"suggestion,omitempty"`
+}
+
+// Grading 是申论批改结果：按采分点逐条比对，不给分数（无官方标准答案）。
+type Grading struct {
+	Points  []GradingPoint `json:"points,omitempty"`
+	Summary string         `json:"summary,omitempty"`
 }
 
 type Subject struct {

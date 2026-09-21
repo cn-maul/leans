@@ -56,10 +56,11 @@ export function analyzeQuestion(
   subject: string,
   content: string,
   signal?: AbortSignal,
+  userAnswer?: string,
 ): Promise<AnalysisResult> {
   return request<AnalysisResult>('/analyze', {
     method: 'POST',
-    body: JSON.stringify({ subject, content }),
+    body: JSON.stringify({ subject, content, user_answer: userAnswer || undefined }),
     signal,
   })
 }
@@ -78,13 +79,14 @@ export async function analyzeQuestionStream(
   content: string,
   handlers: StreamHandlers,
   signal?: AbortSignal,
+  userAnswer?: string,
 ): Promise<AnalysisResult> {
   let resp: Response
   try {
     resp = await fetch(`${BASE_URL}/analyze/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ subject, content }),
+      body: JSON.stringify({ subject, content, user_answer: userAnswer || undefined }),
       signal,
     })
   } catch (e) {

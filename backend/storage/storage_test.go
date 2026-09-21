@@ -181,12 +181,90 @@ func TestHistoryCRUD(t *testing.T) {
 		t.Errorf("result mismatch: %q", got.Result)
 	}
 
+	// 申论记录：user_answer 需完整往返，恢复时才能回填"我的作答"。
+	sid, err := s.AddHistory(model.HistoryItem{
+		Subject:    "申论",
+		Question:   "给定资料2，概括主要做法",
+		UserAnswer: "我的作答：一是……；二是……",
+		Category:   "归纳概括",
+		Result:     `{"category":"归纳概括"}`,
+	})
+	if err != nil {
+		t.Fatalf("AddHistory(申论): %v", err)
+	}
+	sgot, err := s.GetHistory(sid)
+	if err != nil {
+		t.Fatalf("GetHistory(申论): %v", err)
+	}
+	if sgot.UserAnswer != "我的作答：一是……；二是……" {
+		t.Errorf("user_answer round-trip mismatch: %q", sgot.UserAnswer)
+	}
+
 	if err := s.ClearHistory(); err != nil {
 		t.Fatalf("ClearHistory: %v", err)
 	}
 	items, _ = s.ListHistory(10)
 	if len(items) != 0 {
 		t.Errorf("history not cleared: %d items", len(items))
+	}
+}
+
+// TestHistoryMigrateUserAnswer 验证老库升级路径：已存在但没有 user_answer 列的
+// history 表，经 NewStore→migrate 后自动补列，旧行读出空串、新写入能往返。
+func TestHistoryMigrateUserAnswer(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "leans.db")
+
+	// 手工建一个"旧版" history 表（无 user_answer 列）并插一行。
+	raw, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open raw: %v", err)
+	}
+	if _, err := raw.Exec(`CREATE TABLE history (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		subject TEXT NOT NULL,
+		question TEXT NOT NULL,
+		category TEXT NOT NULL DEFAULT '',
+		result TEXT NOT NULL DEFAULT '',
+		model TEXT NOT NULL DEFAULT '',
+		tokens INTEGER NOT NULL DEFAULT 0,
+		elapsed_ms INTEGER NOT NULL DEFAULT 0,
+		first_token_ms INTEGER NOT NULL DEFAULT 0,
+		created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+	)`); err != nil {
+		t.Fatalf("create legacy: %v", err)
+	}
+	if _, err := raw.Exec(`INSERT INTO history (subject, question, result) VALUES ('申论','旧题','{}')`); err != nil {
+		t.Fatalf("insert legacy: %v", err)
+	}
+	raw.Close()
+
+	// 用 NewStore 打开，触发 migrate 补列。
+	s, err := NewStore(dir)
+	if err != nil {
+		t.Fatalf("NewStore migrate: %v", err)
+	}
+	defer s.Close()
+
+	items, err := s.ListHistory(10)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("legacy row lost: %v (%d)", err, len(items))
+	}
+	got, err := s.GetHistory(items[0].ID)
+	if err != nil {
+		t.Fatalf("GetHistory: %v", err)
+	}
+	if got.UserAnswer != "" {
+		t.Errorf("legacy user_answer should default empty, got %q", got.UserAnswer)
+	}
+	// 迁移后新写入应能往返。
+	nid, err := s.AddHistory(model.HistoryItem{Subject: "申论", Question: "新题", UserAnswer: "我的作答X"})
+	if err != nil {
+		t.Fatalf("AddHistory post-migrate: %v", err)
+	}
+	ng, _ := s.GetHistory(nid)
+	if ng.UserAnswer != "我的作答X" {
+		t.Errorf("post-migrate user_answer mismatch: %q", ng.UserAnswer)
 	}
 }
 

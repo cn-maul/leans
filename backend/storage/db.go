@@ -67,6 +67,7 @@ func initTables(db *sql.DB) error {
 			id             INTEGER PRIMARY KEY AUTOINCREMENT,
 			subject        TEXT NOT NULL,
 			question       TEXT NOT NULL,
+			user_answer    TEXT NOT NULL DEFAULT '',
 			category       TEXT NOT NULL DEFAULT '',
 			result         TEXT NOT NULL DEFAULT '',
 			model          TEXT NOT NULL DEFAULT '',
@@ -142,6 +143,9 @@ func migrate(db *sql.DB) error {
 	}
 	if err := ensureColumn(db, "history", "first_token_ms", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return fmt.Errorf("migrate history.first_token_ms: %w", err)
+	}
+	if err := ensureColumn(db, "history", "user_answer", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("migrate history.user_answer: %w", err)
 	}
 	return nil
 }

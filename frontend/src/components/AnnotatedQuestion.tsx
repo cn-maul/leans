@@ -1,17 +1,12 @@
-// AnnotatedQuestion renders the original question text with AI highlight
+// AnnotatedQuestion renders the original (客观题) question text with AI highlight
 // annotations applied directly onto the source text (in-place colored marks).
 //
-// Colors follow the module the highlight belongs to (category/rule/annotation/
-// error/info) so that marks on the left match the modules on the right.
-// annotation 模块使用墨色（ink），整体保持极简单色科技风。
-//
-// Matching is tolerant: AI sometimes rewrites the highlighted phrase with
-// different punctuation or full/half-width chars. We normalize both sides
-// (full-width -> half-width, lowercase, whitespace collapse) and fall back to
-// a punctuation-stripped substring match before giving up.
+// 分块方式：题干 + 选项A–H。highlight 归属哪块按 location 决定。
+// 匹配、颜色、图例等通用逻辑来自 lib/annotation，与申论材料视图共用。
 import { useMemo, type ReactNode } from 'react'
 import { Highlighter } from 'lucide-react'
 import type { Highlight } from '../types/analysis'
+import { findMarkRanges, groupByLocation, MODULE_DOT, type Block } from '../lib/annotation'
 
 interface Props {
   question: string
@@ -52,7 +47,7 @@ export default function AnnotatedQuestion({ question, highlights, active }: Prop
                 {b.label}
               </div>
               <p className="text-[15px] leading-7 whitespace-pre-wrap text-body">
-                {annotate(b.text, byLoc[b.key] || [])}
+                {renderAnnotated(b.text, byLoc[b.key] || [])}
               </p>
             </section>
           ))}
@@ -70,13 +65,7 @@ export default function AnnotatedQuestion({ question, highlights, active }: Prop
   )
 }
 
-// ---- parsing & annotation helpers ----
-
-interface Block {
-  key: string
-  label: string
-  text: string
-}
+// ---- 客观题分块：题干 + 选项 A–H ----
 
 // Split question text into the stem (题干) plus each option.
 function parseBlocks(q: string): Block[] {
@@ -104,118 +93,14 @@ function parseBlocks(q: string): Block[] {
   return blocks
 }
 
-// Normalize a highlight location string to a block key ("A", "B", "stem", ...).
-function normalizeLoc(loc: string): string {
-  const s = (loc || '').trim()
-  const m = s.match(/[A-H]/i)
-  if (m) return m[0].toUpperCase()
-  return 'stem'
-}
-
-function groupByLocation(hs: Highlight[]): Record<string, Highlight[]> {
-  const groups: Record<string, Highlight[]> = {}
-  for (const h of hs) {
-    const key = normalizeLoc(h.location)
-    ;(groups[key] ||= []).push(h)
-  }
-  return groups
-}
-
-interface MarkRange {
-  start: number
-  end: number
-  cls: string
-  tip: string
-}
-
-// ---- tolerant matching ----
-
-// Normalize a single char: full-width -> half-width, lowercase.
-function normChar(ch: string): string {
-  const code = ch.codePointAt(0) ?? 0
-  if (code >= 0xff01 && code <= 0xff5e) {
-    return String.fromCodePoint(code - 0xfee0).toLowerCase()
-  }
-  if (code === 0x3000) return ' '
-  return ch.toLowerCase()
-}
-
-// Returns the normalized text plus a map from normalized index -> original index.
-function normalizeWithMap(text: string): { norm: string; map: number[] } {
-  const out: string[] = []
-  const map: number[] = []
-  for (let i = 0; i < text.length; i++) {
-    out.push(normChar(text[i]))
-    map.push(i)
-  }
-  return { norm: out.join(''), map }
-}
-
-// Compact form: strip whitespace + punctuation from normalized text, keeping a
-// map from compact index -> normalized index.
-function compactForm(text: string): { text: string; map: number[] } {
-  const out: string[] = []
-  const map: number[] = []
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i]
-    if (/\s|[\u3000-\u303f\uff00-\uffef，。、；：？！,.!?;:'"“”‘’（）()【】[]<>《》\-—…·]/.test(ch)) {
-      continue
-    }
-    out.push(ch)
-    map.push(i)
-  }
-  return { text: out.join(''), map }
-}
-
-// annotate matches highlight phrases against a block of original text.
-function annotate(text: string, hs: Highlight[]): ReactNode[] {
-  if (hs.length === 0) return [text]
-
-  const { norm, map } = normalizeWithMap(text)
-  const compact = compactForm(norm)
-  const ranges: MarkRange[] = []
-
-  for (const h of hs) {
-    if (!h.text) continue
-    const needleNorm = normalizeWithMap(h.text).norm.trim()
-
-    // Tier 1: normalized exact substring.
-    let idx = norm.indexOf(needleNorm)
-    if (idx !== -1) {
-      pushRange(ranges, map[idx], map[idx + needleNorm.length - 1], h)
-      continue
-    }
-
-    // Tier 2: punctuation/whitespace stripped, substring on compact forms.
-    const needleCompact = compactForm(needleNorm).text
-    if (needleCompact) {
-      const ci = compact.text.indexOf(needleCompact)
-      if (ci !== -1) {
-        const startN = compact.map[ci]
-        const endN = compact.map[ci + needleCompact.length - 1]
-        pushRange(ranges, map[startN], map[endN], h)
-        continue
-      }
-    }
-    // Tier 3: fall back to highlighting nothing (silently skip).
-  }
-
+// renderAnnotated 把一段文本与其归属的 highlight 渲染为带色 <mark>。
+function renderAnnotated(text: string, hs: Highlight[]): ReactNode[] {
+  const ranges = findMarkRanges(text, hs)
   if (ranges.length === 0) return [text]
-
-  ranges.sort((a, b) => a.start - b.start)
-  const merged: MarkRange[] = []
-  for (const r of ranges) {
-    const last = merged[merged.length - 1]
-    if (last && r.start <= last.end) {
-      if (r.end > last.end) last.end = r.end
-    } else {
-      merged.push({ ...r })
-    }
-  }
 
   const out: ReactNode[] = []
   let pos = 0
-  for (const r of merged) {
+  for (const r of ranges) {
     if (r.start > pos) out.push(text.slice(pos, r.start))
     out.push(
       <mark key={r.start} className={r.cls} title={r.tip}>
@@ -226,40 +111,6 @@ function annotate(text: string, hs: Highlight[]): ReactNode[] {
   }
   if (pos < text.length) out.push(text.slice(pos))
   return out
-}
-
-function pushRange(ranges: MarkRange[], start: number, end: number, h: Highlight) {
-  if (start < 0 || end < start) return
-  // 以 module 为准（与右侧模块同色），旧数据按 color 兜底（紫 → 墨色）。
-  const cls = MODULE_MARK[h.module || ''] || COLOR_MARK[h.color || ''] || MODULE_MARK.category
-  ranges.push({ start, end, cls, tip: h.type + (h.explanation ? '：' + h.explanation : '') })
-}
-
-// module → 标记类。色值定义在 index.css，浅/暗两套各一份。
-const MODULE_MARK: Record<string, string> = {
-  category: 'mark mark-category',
-  rule: 'mark mark-rule',
-  annotation: 'mark mark-answer',
-  error: 'mark mark-error',
-  info: 'mark mark-info',
-}
-
-// 旧数据只有 color 字段时的兜底。
-const COLOR_MARK: Record<string, string> = {
-  blue: 'mark mark-category',
-  green: 'mark mark-rule',
-  ink: 'mark mark-answer',
-  purple: 'mark mark-answer',
-  red: 'mark mark-error',
-  yellow: 'mark mark-info',
-}
-
-const MODULE_DOT: Record<string, string> = {
-  category: 'dot-category',
-  rule: 'dot-rule',
-  annotation: 'dot-answer',
-  error: 'dot-error',
-  info: 'dot-info',
 }
 
 function Legend({ module, label }: { module: string; label: string }) {

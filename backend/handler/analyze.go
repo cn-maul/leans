@@ -30,6 +30,7 @@ func (h *AnalyzeHandler) Handle(c *gin.Context) {
 	result, err := h.analyzer.Analyze(c.Request.Context(), service.AnalyzeOption{
 		Subject:     req.Subject,
 		Content:     req.Content,
+		UserAnswer:  req.UserAnswer,
 		SaveHistory: true,
 	})
 	if err != nil {
@@ -76,6 +77,7 @@ func (h *AnalyzeHandler) HandleStream(c *gin.Context) {
 	result, err := h.analyzer.AnalyzeStream(c.Request.Context(), service.AnalyzeOption{
 		Subject:     req.Subject,
 		Content:     req.Content,
+		UserAnswer:  req.UserAnswer,
 		SaveHistory: true,
 	}, service.StreamCallbacks{
 		OnModel:  func(name string) { send("model", gin.H{"model": name}) },

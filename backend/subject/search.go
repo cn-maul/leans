@@ -1,6 +1,7 @@
 package subject
 
 import (
+	"math"
 	"sort"
 	"strings"
 	"unicode"
@@ -8,35 +9,44 @@ import (
 
 // Retrieval 控制一次检索返回多少、多长的内容。
 type Retrieval struct {
-	MaxSections int // 最多返回几个相关章节（含概述）
-	MaxChars    int // 每个章节正文最多保留多少字符
-	OverviewMax int // 最多注入几个概述章节
+	MaxSections int // 最多返回几个检索块（含概述）
+	MaxChars    int // 每个块正文最多保留多少字符
+	OverviewMax int // 最多注入几个概述块
 }
 
-// Hit 是检索命中的一个章节。Section 指向缓存对象（只读），Content 是
+// Hit 是检索命中的一个内容块。Section 指向缓存对象（只读），Content 是
 // 截断后用于注入 prompt 的正文副本，避免污染缓存。
 type Hit struct {
 	Section *Section
 	Score   int
-	Title   string // 章节标题路径，如 "第二章 / 2.1 说理类解题逻辑"
-	Content string // 截断后的章节正文
+	Title   string // 检索块标题，如 "第二章 / 2.1 说理类解题逻辑 ·块3"
+	Content string // 截断后的块正文
 }
 
-// Search 从题目中提取关键词，在 subject 中打分并返回最相关的章节。
-// 概述类章节（标题含"概述/总论"等）始终优先注入，保证大上下文不缺失。
+// BM25 参数：k1 控制词频饱和，b 控制长度归一化强度。
+const (
+	bm25K1 = 1.5
+	bm25B  = 0.75
+	// pathBonus 是查询词命中标题路径时的加分，远小于正文 BM25，只做同分排序倾斜。
+	pathBonus = 0.8
+)
+
+// Search 用 BM25 在细粒度检索块中打分，返回最相关的内容块。
+// 概述块始终优先注入若干，保证大上下文不缺失。返回类型仍是 []Hit，
+// 使 prompt/analyzer 等下游接口无需改动。
 func (s *Store) Search(id, question string, r Retrieval) []Hit {
 	s.mu.RLock()
 	sub, ok := s.subjects[id]
 	s.mu.RUnlock()
-	if !ok || sub == nil {
+	if !ok || sub == nil || len(sub.chunks) == 0 {
 		return nil
 	}
 
 	if r.MaxSections <= 0 {
-		r.MaxSections = 4
+		r.MaxSections = 6
 	}
 	if r.MaxChars <= 0 {
-		r.MaxChars = 2000
+		r.MaxChars = 1200
 	}
 	if r.OverviewMax <= 0 {
 		r.OverviewMax = 1
@@ -47,112 +57,127 @@ func (s *Store) Search(id, question string, r Retrieval) []Hit {
 		return nil
 	}
 
-	var hits []Hit
-	for _, sec := range sub.sections {
-		score := scoreSection(sec, words)
-		// 概述章节即使基础分 0 也保留（后面有加分），其余需要正分。
-		if score <= 0 && !IsOverviewTitle(sec.Title) {
+	N := float64(len(sub.chunks))
+	type scored struct {
+		chunk *Chunk
+		score float64
+	}
+
+	var overviews, rest []scored
+	for i, c := range sub.chunks {
+		score := bm25Score(sub, i, words, N)
+		// 标题路径命中查询词时给少量加分：让"标题相关但正文无该词"的块也可召回。
+		lpath := strings.ToLower(c.Path)
+		for _, w := range words {
+			if strings.Contains(lpath, w) {
+				score += pathBonus
+			}
+		}
+		if score <= 0 && !c.IsOverview {
 			continue
 		}
-		hits = append(hits, Hit{
-			Section: sec,
-			Score:   score,
+		item := scored{chunk: c, score: score}
+		if c.IsOverview {
+			overviews = append(overviews, item)
+		} else {
+			rest = append(rest, item)
+		}
+	}
+
+	byScore := func(a, b scored) bool { return a.score > b.score }
+	sort.SliceStable(overviews, func(i, j int) bool { return byScore(overviews[i], overviews[j]) })
+	sort.SliceStable(rest, func(i, j int) bool { return byScore(rest[i], rest[j]) })
+
+	// 合并：概述优先占 OverviewMax 个，其余按 BM25 分数补足到 MaxSections。
+	var picked []scored
+	if len(overviews) > r.OverviewMax {
+		overviews = overviews[:r.OverviewMax]
+	}
+	picked = append(picked, overviews...)
+	slots := r.MaxSections - len(picked)
+	if slots < 0 {
+		slots = 0
+	}
+	if slots > len(rest) {
+		slots = len(rest)
+	}
+	picked = append(picked, rest[:slots]...)
+
+	// 转成 Hit：截断正文、拼标题。
+	out := make([]Hit, 0, len(picked))
+	for _, sc := range picked {
+		c := sc.chunk
+		title := c.Path
+		if c.Seq > 0 {
+			title += " ·块" + itoa(c.Seq+1)
+		}
+		content := c.Text
+		if runec := []rune(content); len(runec) > r.MaxChars {
+			content = string(runec[:r.MaxChars]) + "\n……（内容已截断）"
+		}
+		out = append(out, Hit{
+			Section: c.Section,
+			Score:   int(math.Round(sc.score)),
+			Title:   title,
+			Content: content,
 		})
 	}
+	return out
+}
 
-	// 概述章节加分，保证整体介绍一定进入结果。
-	for i := range hits {
-		if IsOverviewTitle(hits[i].Section.Title) {
-			hits[i].Score += 200
+// bm25Score 计算第 idx 个块对查询词的 BM25 得分。
+func bm25Score(sub *Subject, idx int, words []string, N float64) float64 {
+	tf := sub.chunkTF[idx]
+	dl := float64(sub.chunkLen[idx])
+	avgdl := sub.avgdl
+	if avgdl <= 0 {
+		avgdl = 1
+	}
+	score := 0.0
+	for _, w := range words {
+		f, ok := tf[w]
+		if !ok || f == 0 {
+			continue
 		}
+		df := float64(sub.df[w])
+		idf := math.Log(1 + (N-df+0.5)/(df+0.5))
+		tfNorm := float64(f) * (bm25K1 + 1)
+		tfNorm /= float64(f) + bm25K1*(1-bm25B+bm25B*dl/avgdl)
+		score += idf * tfNorm
 	}
+	return score
+}
 
-	sort.SliceStable(hits, func(i, j int) bool {
-		return hits[i].Score > hits[j].Score
-	})
+// termFreqs 统计一段文本的词频（不去重），供 BM25 建索引使用。
+// 与 tokenize 的区别：tokenize 会去重供查询用，这里保留重复以体现真实词频。
+func termFreqs(s string) map[string]int {
+	tokens := tokenizeRaw(s)
+	tf := make(map[string]int, len(tokens))
+	for _, w := range tokens {
+		tf[w]++
+	}
+	return tf
+}
 
-	// 概述章节只保留前 OverviewMax 个，避免霸屏。
-	var overviews, rest []Hit
-	for _, h := range hits {
-		if IsOverviewTitle(h.Section.Title) && len(overviews) < r.OverviewMax {
-			overviews = append(overviews, h)
-		} else if !IsOverviewTitle(h.Section.Title) {
-			rest = append(rest, h)
+// tokenize 把中文/英文题目切成检索词（去重后，供查询使用）。
+func tokenize(s string) []string {
+	raw := tokenizeRaw(s)
+	seen := map[string]bool{}
+	var out []string
+	for _, w := range raw {
+		if stopwords[w] {
+			continue
 		}
-	}
-
-	// 合并：概述优先 + 其余按分。
-	var out []Hit
-	out = append(out, overviews...)
-	restLen := r.MaxSections - len(overviews)
-	if restLen < 0 {
-		restLen = 0
-	}
-	if restLen > len(rest) {
-		restLen = len(rest)
-	}
-	out = append(out, rest[:restLen]...)
-
-	// 构建标题路径 + 截断正文（写进 Hit.Content，不改缓存对象）。
-	for i := range out {
-		path := sectionPath(sub, out[i].Section)
-		parts := append(path, out[i].Section.Title)
-		out[i].Title = strings.Join(parts, " / ")
-		if out[i].Section.Content != "" {
-			content := out[i].Section.Content
-			runes := []rune(content)
-			if len(runes) > r.MaxChars {
-				content = string(runes[:r.MaxChars]) + "\n……（章节已截断）"
-			}
-			out[i].Content = content
+		if !seen[w] {
+			seen[w] = true
+			out = append(out, w)
 		}
 	}
 	return out
 }
 
-// scoreSection 计算一个章节与关键词的相关度：标题命中权重大于正文。
-func scoreSection(sec *Section, words []string) int {
-	title := sec.Title
-	body := sec.Content
-	score := 0
-	for _, w := range words {
-		if strings.Contains(title, w) {
-			score += 3
-		}
-		if strings.Contains(body, w) {
-			score++
-		}
-	}
-	return score
-}
-
-// sectionPath 返回章节在树中的标题路径（不含自身）。
-func sectionPath(sub *Subject, target *Section) []string {
-	var find func(sec *Section, path []string) ([]string, bool)
-	find = func(sec *Section, path []string) ([]string, bool) {
-		if sec == target {
-			return path, true
-		}
-		for _, c := range sec.Children {
-			if p, ok := find(c, append(path, sec.Title)); ok {
-				return p, true
-			}
-		}
-		return nil, false
-	}
-	for _, root := range sub.Tree {
-		if p, ok := find(root, nil); ok {
-			return p
-		}
-	}
-	return nil
-}
-
-// tokenize 把中文/英文题目切成检索词：
-//   - 英文/数字按连续段切
-//   - 中文按连续汉字段切，段长 > 4 时再滑窗产出 2-4 字词
-//   - 过滤单字与停用词
-func tokenize(s string) []string {
+// tokenizeRaw 切词但保留重复、不过滤停用词（供建索引统计词频）。
+func tokenizeRaw(s string) []string {
 	var out []string
 	var cjk, ascii strings.Builder
 	lastIsCJK, lastIsASCII := false, false
@@ -202,20 +227,13 @@ func tokenize(s string) []string {
 	}
 	flush()
 
-	// 去重 + 过滤停用词和过短词。
-	seen := map[string]bool{}
+	// 过滤过短词；不去重、不过滤停用词（停用词过滤只在查询侧做）。
 	var out2 []string
 	for _, w := range out {
 		if len([]rune(w)) < 2 {
 			continue
 		}
-		if stopwords[w] {
-			continue
-		}
-		if !seen[w] {
-			seen[w] = true
-			out2 = append(out2, w)
-		}
+		out2 = append(out2, w)
 	}
 	return out2
 }

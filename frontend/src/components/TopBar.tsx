@@ -1,7 +1,7 @@
-import { BarChart3, History, Moon, PenLine, Settings, Sun } from 'lucide-react'
+import { BarChart3, History, Moon, PenLine, Settings, ScrollText, Sun } from 'lucide-react'
 import type { Theme } from '../types/analysis'
 
-export type View = 'analyze' | 'stats'
+export type View = 'analyze' | 'shenlun' | 'stats'
 
 interface Props {
   lectureName: string
@@ -46,6 +46,12 @@ export default function TopBar({
               onClick={() => onViewChange('analyze')}
               icon={<PenLine className="h-3.5 w-3.5" aria-hidden="true" />}
               label="分析"
+            />
+            <ViewTab
+              active={view === 'shenlun'}
+              onClick={() => onViewChange('shenlun')}
+              icon={<ScrollText className="h-3.5 w-3.5" aria-hidden="true" />}
+              label="申论"
             />
             <ViewTab
               active={view === 'stats'}

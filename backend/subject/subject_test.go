@@ -148,3 +148,28 @@ func TestCleanTypeTitle(t *testing.T) {
 		}
 	}
 }
+
+func TestKindFor(t *testing.T) {
+	cases := map[string]Kind{
+		"言语理解":  KindChoice,
+		"判断推理":  KindChoice,
+		"申论":    KindSubjective,
+		"申论系统班": KindSubjective,
+		"大作文专项": KindSubjective,
+	}
+	for name, want := range cases {
+		if got := KindFor(name); got != want {
+			t.Errorf("KindFor(%q) = %q, want %q", name, got, want)
+		}
+	}
+}
+
+func TestParseSubjectSetsKind(t *testing.T) {
+	sub, err := ParseSubject("申论", "## 第一章 归纳概括\n内容")
+	if err != nil {
+		t.Fatalf("ParseSubject: %v", err)
+	}
+	if sub.Kind != KindSubjective {
+		t.Errorf("subject kind = %q, want subjective", sub.Kind)
+	}
+}

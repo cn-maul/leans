@@ -16,6 +16,10 @@ interface Props {
   onProviderChange: (id: string) => void
   onModelChange: (model: string) => void
   onOpenSettings: () => void
+  // placeholder 自定义输入框提示语（申论页用材料+题目的说明）。
+  placeholder?: string
+  // analyzeLabel 自定义主按钮文案。
+  analyzeLabel?: string
 }
 
 const selectCls =
@@ -37,6 +41,8 @@ export default function QuestionInput({
   onProviderChange,
   onModelChange,
   onOpenSettings,
+  placeholder,
+  analyzeLabel,
 }: Props) {
   const disabled = loading || !question.trim() || !hasSubject
   const activeProvider = providers.find((p) => p.id === activeProviderId)
@@ -85,7 +91,10 @@ export default function QuestionInput({
             onAnalyze()
           }
         }}
-        placeholder={'请粘贴带选项的题目，例如：\n\n这段文字意在说明：\nA. 选项一\nB. 选项二\nC. 选项三\nD. 选项四'}
+        placeholder={
+          placeholder ??
+          '请粘贴带选项的题目，例如：\n\n这段文字意在说明：\nA. 选项一\nB. 选项二\nC. 选项三\nD. 选项四'
+        }
         className="min-h-24 w-full resize-none border-0 bg-transparent p-4 text-[15px] leading-7 text-body outline-none placeholder:text-ghost"
         spellCheck={false}
       />
@@ -182,7 +191,7 @@ export default function QuestionInput({
               className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-pill bg-accent px-4 text-[13px] font-medium text-white transition-[background-color,transform,opacity] duration-150 ease-quart hover:bg-accent-deep active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40 disabled:active:scale-100"
             >
               <Send className="h-3.5 w-3.5" aria-hidden="true" />
-              开始分析
+              {analyzeLabel ?? '开始分析'}
               <kbd className="ml-1 hidden rounded-chip border border-white/30 px-1 text-[10px] font-normal leading-4 text-white/75 lg:inline">
                 Ctrl ⏎
               </kbd>

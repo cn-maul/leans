@@ -11,12 +11,13 @@ ai:
   model: "gpt-4o"
 
 # 分析时的 token 预算：数值越小单次分析越省 token，但注入的讲义内容越少。
-# 实测参考（言语理解题）：默认配置单次约 4100 token（输入~1200 + 输出~2900）。
+# 检索已改为 BM25 + 细粒度分块：注入的是若干 ~600 字小块，而非整节，
+# 同预算下召回更全、噪声更低。max_sections 现为"检索块"数量。
 analysis:
-  lecture_budget: 6000   # 讲义注入字符上限（输入 token 大头）
-  max_sections: 2        # 检索注入的相关章节数
-  max_chars: 1500        # 每个章节最大字符
-  overview_max: 1        # 讲义整体概述章节数
+  lecture_budget: 6000   # 讲义注入字符上限（输入 token 大头，对拼接后的块再截一次）
+  max_sections: 6        # 检索注入的相关块数
+  max_chars: 1200        # 每个块最大字符
+  overview_max: 1        # 讲义整体概述块数
   max_tokens: 4096       # 输出 token 硬顶（防模型输出失控；设太小会截断 JSON 导致重试，反而更贵）
 
 subjects:

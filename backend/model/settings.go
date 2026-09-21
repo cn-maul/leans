@@ -42,6 +42,7 @@ type HistoryItem struct {
 	ID           int64  `json:"id"`
 	Subject      string `json:"subject"`
 	Question     string `json:"question"`
+	UserAnswer   string `json:"user_answer,omitempty"` // 主观题（申论）自己的作答，恢复时回填"我的作答"
 	Category     string `json:"category"`
 	Result       string `json:"result,omitempty"`
 	Model        string `json:"model,omitempty"`
