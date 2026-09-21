@@ -60,6 +60,7 @@ export function useAnalysis() {
   const [partial, setPartial] = useState<PartialAnalysis | null>(null)
   const [liveModel, setLiveModel] = useState('')
   const [liveFirstTokenMS, setLiveFirstTokenMS] = useState(0)
+  const [liveStartedAt, setLiveStartedAt] = useState(0)
   const firstTokenAtRef = useRef(0)
   const abortRef = useRef<AbortController | null>(null)
 
@@ -79,6 +80,7 @@ export function useAnalysis() {
     setLiveFirstTokenMS(0)
     firstTokenAtRef.current = 0
     const startedAt = Date.now()
+    setLiveStartedAt(startedAt)
     const acc = { text: '' }
 
     try {
@@ -144,7 +146,8 @@ export function useAnalysis() {
     setPartial(null)
     setLiveModel('')
     setLiveFirstTokenMS(0)
+    setLiveStartedAt(0)
   }, [])
 
-  return { result, stage, error, run, cancel, reset, setResult, partial, liveModel, liveFirstTokenMS }
+  return { result, stage, error, run, cancel, reset, setResult, partial, liveModel, liveFirstTokenMS, liveStartedAt }
 }

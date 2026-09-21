@@ -43,6 +43,7 @@ function App() {
     partial,
     liveModel,
     liveFirstTokenMS,
+    liveStartedAt,
   } = useAnalysis()
   const analysisLoading = stage === 'running'
 
@@ -216,6 +217,7 @@ function App() {
                 partial={partial}
                 firstTokenMS={liveFirstTokenMS}
                 model={liveModel}
+                startedAt={liveStartedAt}
               />
             </section>
           </>

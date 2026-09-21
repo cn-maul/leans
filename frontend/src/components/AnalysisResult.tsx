@@ -8,6 +8,8 @@ interface PanelProps {
   partial?: PartialAnalysis | null
   firstTokenMS?: number
   model?: string
+  // 本次运行的起点时间戳（useAnalysis 在 run() 里设置），供实时计时器求差。
+  startedAt?: number
 }
 
 function normalizeRules(result: AnalysisResult): Rule[] {
@@ -25,16 +27,18 @@ function normalizeRules(result: AnalysisResult): Rule[] {
   return []
 }
 
-// 实时用时计时器（running 期间每 100ms 刷新）。
-function useElapsed(running: boolean): string {
-  const [startedAt] = useState(() => Date.now())
-  const [now, setNow] = useState(() => Date.now())
+// 实时用时计时器：running 期间每 100ms 刷新一次 now，用时 = now - startedAt。
+// 起点 startedAt 由上层（run 事件）提供，天然每题重置；effect 只在 interval 里
+// 异步 setState，不在 effect 体内同步 setState、也不在渲染期读写 ref。
+function useElapsed(running: boolean, startedAt: number): string {
+  const [now, setNow] = useState(0)
   useEffect(() => {
     if (!running) return
     const t = setInterval(() => setNow(Date.now()), 100)
     return () => clearInterval(t)
   }, [running])
-  return ((now - startedAt) / 1000).toFixed(1)
+  if (!running || !startedAt) return '0.0'
+  return (Math.max(0, (now - startedAt) / 1000)).toFixed(1)
 }
 
 // ---- 顶部三胶囊：题型 / 技巧名称 / 答案 ----
@@ -272,11 +276,12 @@ export function AnnotationPanel({
   partial,
   firstTokenMS = 0,
   model,
+  startedAt = 0,
 }: PanelProps) {
   const meta = result?.meta
   const hasMeta = !!meta && (meta.elapsed_ms > 0 || meta.total_tokens > 0)
   const streamingText = loading ? (partial?.annotation || '') : ''
-  const elapsed = useElapsed(Boolean(loading))
+  const elapsed = useElapsed(Boolean(loading), startedAt)
   const bodyRef = useRef<HTMLDivElement | null>(null)
 
   // 流式输出时自动滚动到底部。
@@ -345,7 +350,7 @@ export function AnnotationPanel({
             <Caret />
           </p>
         ) : (
-          <AnalyzingState />
+          <AnalyzingState startedAt={startedAt} />
         )
       ) : !result ? (
         <EmptyHint text="等待分析结果" hint="完成分析后在这里查看解题思路" />
@@ -368,9 +373,9 @@ function Caret() {
 const STAGES = ['正在检索讲义相关章节…', '正在调用 AI 分析题目…', '正在等待模型输出…']
 
 // 首个 token 到达前的等待态：实时用时 + 阶段提示。
-function AnalyzingState() {
+function AnalyzingState({ startedAt }: { startedAt: number }) {
   const [stage, setStage] = useState(0)
-  const elapsed = useElapsed(true)
+  const elapsed = useElapsed(true, startedAt)
 
   useEffect(() => {
     const stageTimer = setInterval(() => {
