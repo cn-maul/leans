@@ -45,7 +45,7 @@ export default function TopBar({
               active={view === 'analyze'}
               onClick={() => onViewChange('analyze')}
               icon={<PenLine className="h-3.5 w-3.5" aria-hidden="true" />}
-              label="分析"
+              label="言语"
             />
             <ViewTab
               active={view === 'shenlun'}
